@@ -291,6 +291,25 @@
   .card .errbox pre { display:none; }          /* the full excerpt is in the agent's panel */
   .errbox code { display:inline-block; margin-top:3px; font-size:11px; color:#ffdfe2; background:rgba(0,0,0,.25); padding:0 4px; border-radius:3px; }
   .errbox pre { margin:4px 0 0; max-height:7.5em; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:11px; color:#f3d6d9; background:rgba(0,0,0,.25); padding:4px 6px; border-radius:4px; }
+  /* waiting (a card that needs a decision) reads amber, a crashed run stays red */
+  .errbox.warn { background:#3a3218; border-color:#6a5a2a; color:#ffe08a; }
+  .errbox .errtitle, .errbox .errstale, .errbox .errnote { color:var(--muted); font-size:11.5px; margin-top:3px; overflow-wrap:anywhere; }
+  .errbox .errstale code, .errbox .errnote code { margin-top:0; }
+  /* the operator's own buttons: Restart / Approve / Dismiss, straight onto the kanban */
+  .erracts { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .oact { background:#2f3552; color:var(--text); border:1px solid #4a5175; border-radius:6px; padding:4px 9px; font:inherit; font-size:12px; cursor:pointer; }
+  .oact:hover { background:#3a4266; border-color:#6b74a3; }
+  .oact:disabled { opacity:.6; cursor:wait; }
+  .oact:focus-visible { outline:2px solid #9ab7ff; outline-offset:2px; }
+  /* the live run of the CURRENT attempt (spec 3): proof that "working" means now */
+  .runline { margin-top:4px; font-size:11.5px; color:var(--muted); }
+  .runline.dead { color:#ffb36b; }
+  /* the crashed attempts, folded away so they never mix with the current one */
+  details.prev { margin-top:6px; font-size:12px; }
+  details.prev > summary { cursor:pointer; color:var(--muted); }
+  details.prev .att { margin:4px 0 0 4px; padding-inline-start:8px; border-inline-start:2px solid var(--line); color:var(--muted); }
+  details.prev .att ol { margin:2px 0 4px; padding-inline-start:18px; max-height:12em; overflow:auto; }
+  details.prev .att li span { color:var(--muted); }
   #detail a, .card a { text-decoration:underline; text-decoration-color:rgba(158,197,255,.4); text-underline-offset:2px; }
   #looks input[type=text] { width:100%; box-sizing:border-box; background:#1d2030; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
   #zoomui { position:absolute; right:8px; bottom:8px; z-index:3; display:flex; gap:4px; }
@@ -315,6 +334,44 @@
   [dir="rtl"] #news { right:auto; left:16px; }
   body:has(#agents-btn:not([hidden])) #news { bottom:56px; }   /* sit above the Agents button, not under it */
   footer { color:var(--muted); font-size:12px; margin-top:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  /* The Agents dialog (the bottom inline script builds its rows) */
+  #agents-panel .ag-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+  #agents-panel .ag-titles { min-width:0; }
+  #ag-acct { font-size:11px; font-weight:400; color:#9ab; margin-top:2px; }
+  #ag-body .tw { word-break:break-word; }
+  #ag-body .blk { color:#ffe08a; font-size:11.5px; margin-top:2px; }
+  #ag-body .agacts { display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; }
+  /* ---------- 390 × 844 (Chrome mobile emulation): the phone layout ----------
+     Everything here is the desktop layout's same rules, retuned for 390 px: the header line gets
+     its own row, the dialog scrolls and says so, and the Agents button moves off the detail sheet. */
+  @media (max-width: 640px) {
+    /* the phone's own status bar would sit on top of the h1/#status line */
+    body { padding-top: env(safe-area-inset-top); }
+    .wrap { padding: calc(10px + env(safe-area-inset-top)) 10px 24px; }
+    header { gap: 6px; }
+    #status { flex: 1 1 100%; order: 3; font-size: 11px; }   /* the count line wraps under the title, never clipped */
+    #agents-panel { width: calc(100vw - 12px) !important; max-height: 92vh !important; display: flex; flex-direction: column; }
+    #agents-panel .ag-head { flex-wrap: wrap; gap: 8px; align-items: center; padding-right: 4px; overflow: visible; }
+    #agents-panel .ag-head .ag-titles { flex: 1 1 100%; }
+    #ag-sum { font-size: 13px; }
+    #agents-panel .ag-head > span { display: inline-flex; gap: 10px; }
+    #agents-panel .ag-head button { min-height: 34px; padding: 6px 12px; border-radius: 8px; }
+    #agents-panel button:focus-visible { outline: 2px solid #9ab7ff; outline-offset: 2px; }
+    /* the inline max-height:70vh is what makes row 6 vanish with no affordance: let the body flex */
+    #ag-body { flex: 1 1 auto; min-height: 0; max-height: none !important; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+    #ag-body table { display: block; width: 100%; }
+    #ag-body tr { display: block; padding: 8px 2px; border-top: 1px solid #2a2a38; }
+    #ag-body th { display: none; }
+    #ag-body td { display: block; }
+    #ag-body td[data-l]::before { content: attr(data-l); color: #9ab; margin-inline-end: 6px; }
+    #ag-body td.task > .tw { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+    #ag-body[data-more]::after { content: '▼ ' attr(data-more) ' more below — scroll'; display: block; text-align: center; color: #9ab; padding: 8px; position: sticky; bottom: 0; }
+    [lang="tr"] #ag-body[data-more]::after { content: '▼ ' attr(data-more) ' aşağıda — kaydır'; }
+    /* the Agents button must not cover the bottom card: dock it top-right, clear of ⚙ */
+    #agents-btn { top: calc(6px + env(safe-area-inset-top)); right: 52px !important; bottom: auto !important; z-index: 60 !important; }
+    #detail.sheet { max-height: 58vh; }
+    #detail.sheet .erracts { position: sticky; bottom: 0; }   /* the buttons stay reachable while the card scrolls */
+  }
 </style>
 </head>
 <body>
@@ -461,6 +518,21 @@
       lookServer: 'Saved on the machine running Cubicle, so every screen of this office shows it.', lookLocal: 'Saved in this browser. Export it to use it in another one.',
       lookDenied: 'Only a browser on the machine running Cubicle can change the appearance. Saved in this browser for now.',
       needsYouTitle: (n) => `${n} needs you`,
+      // The office operator actions (spec 2): the banner's buttons, the counters that add up,
+      // the live-run line. Every read falls back to English so a missing key never prints undefined.
+      summaryMore: (k, e) => `${k} waiting · ${e} in error`,
+      countTitle: 'N = working + waiting + error + idle + paused · working = a task claimed right now (or a live orchestrator session), waiting = a card that needs your decision, error = a crashed run',
+      actionsDisabled: 'actions disabled on this server',
+      staleIgnored: (n) => `${n} older crashed card${n === 1 ? '' : 's'} ignored (they were blocked before this agent’s last finished work)`,
+      runAlive: (since, hb) => `▶ started ${since} · alive, ${hb}`,
+      runDead: (since, hb) => `⏱ started ${since} · no heartbeat for ${hb}`,
+      runAttempt: (at, n) => `attempt ${at} of ${n}`,
+      runSecond: 's', runMinute: 'min', runHour: 'h',
+      prevAttempts: (n) => `previous attempts (${n})`, prevSteps: (n) => `${n} steps`,
+      // the three kanban writes, the confirmation that gates them, and what each answer means
+      actRestart: 'Restart', actApprove: 'Approve', actDismiss: 'Dismiss',
+      actTitle: 'Confirm this', actOk: 'OK', actNote: 'One line for the card (optional)',
+      actSince: (d) => `blocked ${d}`, actSlow: (n) => `slow down — retry in ${n}s`,
       lastSteps: 'Last steps', whatsNew: (v) => `Cubicle was updated to ${v}.`, whatsNewLink: "What's new", reloadNote: 'Cubicle was updated.', reloadBtn: 'Reload the page', upNew: (v, cur) => `⬆ Cubicle ${v} is out (you have ${cur}).`, upHow: 'To update:', upCopy: 'Copy', upCopied: 'Copied', upAuto: 'It updates itself in a moment; this page then reloads.', upAutoHint: 'Start Cubicle with --auto-update and it updates itself.', upNow: 'Update now', upBusy: 'Updating…', upDone: 'Updated; reloading.', upErr: 'It could not update from here. Run this instead:', upFail: 'Could not update from here (it needs an instance admin). Run this where Paperclip runs:',
       pairs: [['Did you merge it?', 'Tests first. Always tests first.'], ['Coffee or tea?', 'Whatever keeps the tokens flowing.'], ['Who broke the build?', 'Not me, I was in the lounge.'],
         ['Busy day?', 'Forty tool calls and counting.'], ['Any news from the board?', 'Still waiting on an approval.'], ['Nice desk.', 'It has two monitors now!']],
@@ -570,6 +642,19 @@
       lookServer: 'Cubicle’ın çalıştığı makinede saklanır; bu ofisi gösteren her ekran aynı görünümü görür.', lookLocal: 'Bu tarayıcıda saklanır. Başka bir tarayıcıda kullanmak için dışa aktarın.',
       lookDenied: 'Görünümü yalnızca Cubicle’ın çalıştığı makinedeki bir tarayıcı değiştirebilir. Şimdilik bu tarayıcıda saklandı.',
       needsYouTitle: (n) => `${n} sizi bekliyor`,
+      // Büro operatör işlemleri (spec 2): afişteki düğmeler, toplanan sayaçlar, canlı çalışma satırı.
+      summaryMore: (k, e) => `${k} karar bekliyor · ${e} hatalı`,
+      countTitle: 'N = çalışıyor + karar bekleyen + hatalı + boşta + duraklatılmış · çalışıyor = şu anda üstlenilmiş bir kart (ya da canlı yönetici oturumu), karar bekleyen = sizin kararınızı bekleyen kart, hatalı = çökmüş bir çalıştırma',
+      actionsDisabled: 'işlemler bu sunucuda kapalı',
+      staleIgnored: (n) => `${n} eski çökmüş kart yok sayıldı (bu ajanın son bitmiş işinden önce engellenmişlerdi)`,
+      runAlive: (since, hb) => `▶ ${since} başladı · canlı, ${hb}`,
+      runDead: (since, hb) => `⏱ ${since} · son nabız ${hb} önce`,
+      runAttempt: (at, n) => `deneme ${at}/${n}`,
+      runSecond: 'sn', runMinute: 'dk', runHour: 'sa',
+      prevAttempts: (n) => `önceki denemeler (${n})`, prevSteps: (n) => `${n} adım`,
+      actRestart: 'Yeniden başlat', actApprove: 'Onayla', actDismiss: 'Yoksay',
+      actTitle: 'Bu işlemi onayla', actOk: 'Tamam', actNote: 'Kart için tek satır (isteğe bağlı)',
+      actSince: (d) => `${d} önce engellendi`, actSlow: (n) => `yavaşla — ${n} sn sonra tekrar dene`,
       lastSteps: 'Son adımlar', whatsNew: (v) => `Cubicle ${v} sürümüne güncellendi.`, whatsNewLink: 'Yenilikler', reloadNote: 'Cubicle güncellendi.', reloadBtn: 'Sayfayı yenile', upNew: (v, cur) => `⬆ Cubicle ${v} çıktı (sizdeki ${cur}).`, upHow: 'Güncellemek için:', upCopy: 'Kopyala', upCopied: 'Kopyalandı', upAuto: 'Birazdan kendiliğinden güncellenecek; sayfa da yenilenir.', upAutoHint: 'Cubicle’ı --auto-update ile başlatırsanız kendiliğinden güncellenir.', upNow: 'Şimdi güncelle', upBusy: 'Güncelleniyor…', upDone: 'Güncellendi; sayfa yenileniyor.', upErr: 'Buradan güncellenemedi. Bunun yerine şunu çalıştırın:', upFail: 'Buradan güncellenemedi (yönetici yetkisi gerekir). Paperclip’in çalıştığı yerde şunu çalıştırın:',
       pairs: [['Merge ettin mi?', 'Önce testler. Her zaman önce testler.'], ['Kahve mi çay mı?', 'Tokenları akıtan hangisiyse.'], ['Build’i kim bozdu?', 'Ben değilim, moladaydım.'],
         ['Yoğun gün mü?', 'Kırk araç çağrısı, sayıyorum.'], ['Yönetimden haber var mı?', 'Hâlâ bir onay bekliyorum.'], ['Masan güzelmiş.', 'Artık iki monitörü var!']],
@@ -1131,6 +1216,9 @@
   const wantLang = (params.get('lang') || savedLang || navigator.language || 'en').slice(0, 2).toLowerCase();
   const lang = STR[wantLang] ? wantLang : 'en';
   const L = STR[lang];
+  // English is the fallback for every new key (only EN and TR are extended for the office actions),
+  // so a language that has not caught up shows English rather than `undefined`.
+  const EN = STR.en;
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   // Becomes true in init() as well when the page is served without the Cubicle
@@ -1166,6 +1254,8 @@
   const companySel = document.getElementById('company');
   document.getElementById('hint').textContent = L.hint;
   statusEl.textContent = L.connecting;
+  // The count line has to be checkable by hand, so the tooltip says what each word counts.
+  statusEl.title = L.countTitle || EN.countTitle;
 
   // Office layout, in tiles. Three rows of four desks by default. With more agents than desks
   // the office grows so that its shape follows the window: another row of desks (and lounge
@@ -2236,11 +2326,17 @@
             title: a.role || a.title || '', createdAt: String(a.since ?? a.createdAt ?? i).padStart(20, '0'),
             status: STATUS_ALIASES[String(a.status || 'idle').toLowerCase()] || 'idle',
             errorReason: a.error || null, task, completedAt: a.completedAt || null,
+            // the office's own additions (docs/spec-actions-backend.md): the card behind the badge,
+            // the older crashed ones, and the live run of the current attempt
+            attention: a.attention || null, stale: Array.isArray(a.stale) ? a.stale : [],
+            run: a.run || null, previous: Array.isArray(a.previous) ? a.previous : null,
             room: a.room || '', parent: a.parent ? `${path}#${a.parent}` : null,
             recent: Array.isArray(a.recent) ? a.recent : null,
           };
         });
-        return { agents, issues: [], label: p.label };
+        // Cards the backend stopped reporting (archived or dismissed duplicates): the office drops
+        // any link a sprite still holds to them. Top level of the feed, so it is not per agent.
+        return { agents, issues: [], label: p.label, dismissedTasks: Array.isArray(raw?.dismissedTasks) ? raw.dismissedTasks : [] };
       },
     };
     return p;
@@ -2357,14 +2453,38 @@
     return (code === 401 || code === 403) ? L.denied(code) : L.unreachable;
   }
 
+  // What this server lets the dashboard write, read once per poll: every banner asks the same
+  // question, so one answer per look at the office is enough. A server without the route (a stock
+  // Cubicle, the demo) answers "no writes here", which is exactly what the buttons should do then.
+  let officeCaps = null;
+  async function fetchOfficeCaps() {
+    try {
+      const r = await fetch('/api/office/actions', { cache: 'no-store' });
+      if (!r.ok) return { writable: false, reason: null, actions: [] };
+      const j = await r.json();
+      return { writable: !!j.writable, reason: j.reason || null, actions: Array.isArray(j.actions) ? j.actions : [] };
+    } catch (_) { return officeCaps || { writable: false, reason: null, actions: [] }; }
+  }
+
+  // The outcome of an operator action, shown in the header line. poll() keeps it in front for a few
+  // seconds, otherwise the next answer four seconds later buries "slow down" before it is readable.
+  let statusNote = '', statusNoteUntil = 0;
+  function setStatusNote(text, secs = 8) { statusNote = String(text); statusNoteUntil = Date.now() + secs * 1000; statusEl.textContent = statusNote; }
+
   async function poll() {
-    const results = await Promise.allSettled(providers.map((p) => p.load()));
-    const agents = [], issues = [], labels = [], failed = [], notes = [];
+    // Asked in the same breath as the feed, so a poll is still one round trip. Only worth asking
+    // when there is an office server behind this page at all (the demo and Paperclip have none).
+    const capsPromise = providers.some((p) => p.kind === 'feed')
+      ? fetchOfficeCaps() : Promise.resolve(officeCaps || { writable: false, reason: null, actions: [] });
+    const [caps, results] = await Promise.all([capsPromise, Promise.allSettled(providers.map((p) => p.load()))]);
+    officeCaps = caps; window.__officeCaps = caps;
+    const agents = [], issues = [], labels = [], failed = [], notes = [], dismissedTasks = [];
     results.forEach((r, i) => {
       if (r.status === 'rejected') { failed.push(i); return; }
       r.value.agents.forEach((a) => { a._src = i; });
       agents.push(...r.value.agents);
       issues.push(...r.value.issues);
+      if (Array.isArray(r.value.dismissedTasks)) dismissedTasks.push(...r.value.dismissedTasks);
       if (r.value.label) labels.push(r.value.label);
       if (r.value.note) notes.push(r.value.note);
     });
@@ -2376,7 +2496,7 @@
     if (!/github\.io$/.test(location.hostname)) document.title = labels.length ? `Cubicle · ${labels.join(' · ')}` : 'Cubicle';
     officeName = labels[0] || '';
     renderNav();
-    sync(agents, issues);
+    sync(agents, issues, dismissedTasks);
     deepLink();
     if (!DEMO) {
       const b = document.getElementById('banner');
@@ -2384,13 +2504,18 @@
         b.innerHTML = providers.some((p) => p.claude) ? L.emptyClaude : L.empty; b.style.display = 'block';
       } else b.style.display = 'none';
     }
-    const running = agents.filter((a) => a.status === 'running').length;
+    // The counters must add up to the office: an agent is exactly one of the five feed statuses, and
+    // it is counted once, so the headline can be checked against the rows by hand.
+    const counts = { running: 0, waiting: 0, error: 0, idle: 0, paused: 0 };
+    agents.forEach((a) => { counts[a.status] = (counts[a.status] || 0) + 1; });
     const needYou = [...sprites.values()].filter((x) => x.status === 'waiting' || x.ask).length;
     const down = failed.map((i) => `⚠ ${providers[i].label}: ${failureText(providers[i], results[i].reason)}`);
-    statusEl.textContent = [
-      notes.length && !agents.length ? notes.join(' ') : L.summary(agents.length, running),
+    const line = [
+      notes.length && !agents.length ? notes.join(' ')
+        : `${L.summary(agents.length, counts.running)} · ${(L.summaryMore || EN.summaryMore)(counts.waiting, counts.error)}`,
       needYou ? L.needYou(needYou) : '', ...down, redacted ? L.redacted : '', timeText(),
     ].filter(Boolean).join(' · ');
+    statusEl.textContent = Date.now() < statusNoteUntil ? `${statusNote} · ${line}` : line;
   }
 
   companySel.addEventListener('change', () => {
@@ -2445,7 +2570,7 @@
     try { return new Intl.RelativeTimeFormat(lang, { numeric: 'always' }).format(-n, u); } catch (_) { return `${n} ${u}`; }
   }
 
-  function sync(agents, issues) {
+  function sync(agents, issues, dismissedTasks = []) {
     const shift = humanOn() ? 1 : 0;      // the human sits at the first desk
     layoutFor(agents.length + shift);
     const sorted = [...agents].sort((a, b) => ((a._src || 0) - (b._src || 0)) || String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -2491,8 +2616,18 @@
       s.role = a.title || a.role || '';
       s.status = a.status;
       s.error = a.errorReason || '';
+      // the office's own additions, straight from the feed (docs/spec-actions-backend.md): the card
+      // behind the badge, the older crashed ones, the live run, and the attempts before it.
+      s.attention = a.attention || null; s.stale = a.stale || [];
+      s.run = a.run || null; s.previous = a.previous || null;
       s.spent = Number(a.spentMonthlyCents) || 0; s.budget = Number(a.budgetMonthlyCents) || 0;
       s.task = a.task !== undefined ? a.task : currentTask(a.id, issues);
+      // A card the dashboard dismissed or the board archived: drop every link the sprite still holds
+      // to it, so a resolved banner cannot go on naming a card under a badge that has moved on.
+      if (dismissedTasks.length) {
+        if (s.attention && dismissedTasks.includes(s.attention.task && s.attention.task.id)) s.attention = null;
+        if (s.task && dismissedTasks.includes(s.task.identifier)) s.task = null;
+      }
       s.waitReason = '';
       s.ask = a.task === undefined && a.status !== 'error' ? askingBoard(a.id, issues) : null;
       if (s.ask && a.status === 'idle') { s.status = 'waiting'; s.task = s.ask.issue; s.waitReason = s.ask.reason; }
@@ -3180,13 +3315,147 @@
     ? `${pcLink()}/${encodeURIComponent(company.issuePrefix)}/agents/${encodeURIComponent(s.urlKey || s.id)}/runs/${encodeURIComponent(s.lastFail.runId)}` : '');
   const agentUrl = (s) => (s.urlKey !== undefined && pcLink() && company && !DEMO
     ? `${pcLink()}/${encodeURIComponent(company.issuePrefix)}/agents/${encodeURIComponent(s.urlKey || s.id)}` : '');
-  // The error to show: the agent's own error text, or its last Paperclip run when that one failed.
+  // ---------- the operator's own actions on the kanban (docs/spec-actions-backend.md) ----------
+  // Three writes the dashboard can make from a banner: restart a crashed card, approve one that
+  // waits for a decision, dismiss the crashed run behind a badge. None of them is sent on a click:
+  // the button first asks the server what it *would* do, shows that sentence, and only an explicit
+  // OK writes. A cancelled dialog sends nothing at all, and a refused POST is never retried.
+  const ACT_KEY = { restart: 'actRestart', approve: 'actApprove', dismiss: 'actDismiss' };
+  const BLOCK_KIND = { crashed: 'error', needs_input: 'waiting' };   // the kind, in the pill's own words
+  const actLabel = (x) => (ACT_KEY[x.kind] && (L[ACT_KEY[x.kind]] || EN[ACT_KEY[x.kind]])) || x.label || x.kind;
+
+  // The buttons themselves. They always carry the card id: a button that cannot name the card it
+  // would restart is a button that can restart the wrong one. The Agents dialog (a separate script
+  // at the bottom of this file) renders them through window.__officeActsHtml, so the wording and the
+  // data attributes come from one place.
+  function officeActsHtml(o, cls) {
+    const a = o.attention, t = a && a.task, acts = a && Array.isArray(a.actions) ? a.actions : [];
+    if (!t || !t.id || !acts.length) return '';
+    if (!officeCaps || !officeCaps.writable) {
+      return `<div class="errnote" style="color:#9ab;font-size:11.5px;margin-top:4px">ⓘ ${esc(L.actionsDisabled || EN.actionsDisabled)}</div>`;
+    }
+    return `<div class="${cls || 'erracts'}">${acts.map((x) => `<button type="button" class="oact" data-oact="${esc(x.kind)}" data-task="${esc(t.id)}" data-agent="${esc(o.id)}"`
+      + `${t.title ? ` data-title="${esc(t.title)}"` : ''}${x.why ? ` title="${esc(x.why)}"` : ''}>${esc(actLabel(x))}</button>`).join('')}</div>`;
+  }
+  function officeBusy(btn, on) {
+    const box = btn.closest('.erracts, .agacts');
+    const list = box ? [...box.querySelectorAll('button.oact')] : [btn];
+    for (const b of list) { b.disabled = on; b.dataset.busy = on ? '1' : ''; b.setAttribute('aria-busy', on ? 'true' : 'false'); }
+  }
+  // The confirmation: the server's sentence about what it will do, the card it names, and for
+  // Approve one optional line the board can read later. Closing it any other way is a cancel.
+  function officeConfirm(preview, card, why, wantNote) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (v) => { if (settled) return; settled = true; qDlg.removeEventListener('close', onCancel); resolve(v); };
+      const onCancel = () => settle(null);
+      const note = wantNote ? `<div class="qp"><label for="oact-note">${esc(L.actNote || EN.actNote)}</label>`
+        + `<br><input id="oact-note" type="text" maxlength="200" autocomplete="off" style="width:100%;max-width:420px"></div>` : '';
+      qDlg.innerHTML = `<h2>⚠ ${esc(L.actTitle || EN.actTitle)}<button type="button" data-q="close" aria-label="${esc(L.cancel)}">✕</button></h2>`
+        + `<div class="sub">${esc(card)}</div>`
+        + `<div class="qs"><div class="qt">${esc(preview)}</div>${why ? `<div class="qp">${esc(why)}</div>` : ''}${note}</div>`
+        + `<div class="acts"><button type="button" class="act warn" id="oact-ok">${esc(L.actOk || EN.actOk)}</button>`
+        + `<button type="button" class="act" id="oact-no">${esc(L.cancel)}</button></div>`;
+      qDlg.querySelector('#oact-ok').addEventListener('click', () => {
+        const inp = qDlg.querySelector('#oact-note');
+        settle(inp ? inp.value : true); qDlg.close();
+      });
+      qDlg.querySelector('#oact-no').addEventListener('click', () => { settle(null); qDlg.close(); });
+      qDlg.addEventListener('close', onCancel);
+      if (!qDlg.open) qDlg.showModal();
+      const inp = qDlg.querySelector('#oact-note'); if (inp) inp.focus();
+    });
+  }
+  async function doOfficeAction(kind, agent, btn) {
+    const o = typeof agent === 'string' ? (sprites.get(agent) || { id: agent }) : (agent || {});
+    // The button names the card it was drawn for; a sprite that has moved on since then cannot
+    // quietly write to whatever it is holding now.
+    const task = (btn && btn.dataset.task) || (o.attention && o.attention.task && o.attention.task.id) || '';
+    if (!kind || !task) return;
+    if (!officeCaps || !officeCaps.writable) { setStatusNote(`ⓘ ${L.actionsDisabled || EN.actionsDisabled}`); return; }
+    if (btn && (btn.disabled || btn.dataset.busy)) return;                     // one click at a time
+    officeBusy(btn, true);
+    const done = (msg) => { officeBusy(btn, false); setStatusNote(msg); return null; };
+    let token = '', preview = '', why = '';
+    try {
+      const r = await fetch(`/api/office/confirm?action=${encodeURIComponent(kind)}&task=${encodeURIComponent(task)}`, { headers: { 'x-cubicle': '1' }, cache: 'no-store' });
+      const j = await r.json().catch(() => ({}));
+      token = String(j.token || ''); preview = String(j.preview || j.label || ''); why = String(j.why || '');
+      if (!r.ok || !token) return done(`⚠ ${j.message || j.error || `HTTP ${r.status}`}`);   // no token, no write
+    } catch (_) { return done(`⚠ ${L.unreachable}`); }
+    const ctitle = (btn && btn.dataset.title) || (o.attention && o.attention.task && o.attention.task.title) || '';
+    const ans = await officeConfirm(preview || `${kind} ${task}`, `${task}${ctitle ? ` · ${ctitle}` : ''}`, why, kind === 'approve');
+    if (ans === null) return done(`✕ ${preview || kind}`);                     // cancelled: not one request was sent
+    const body = { action: kind, task, token };
+    if (o.id) body.agent = o.id;
+    if (typeof ans === 'string' && ans.trim()) body.note = ans.trim().slice(0, 500);
+    let res = null, j = {};
+    try {
+      res = await fetch('/api/office/action', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: JSON.stringify(body) });
+      j = await res.json().catch(() => ({}));
+    } catch (_) { return done(`⚠ ${L.unreachable}`); }                          // never retried: it may well have landed
+    if (res.status === 429) return done(`⏱ ${(L.actSlow || EN.actSlow)(Number(res.headers.get('retry-after')) || 10)}`);
+    if (!res.ok || j.ok === false) return done(`⚠ ${j.message || j.error || `HTTP ${res.status}`}`);
+    done(`✓ ${preview || `${kind} ${task}`}`);          // the server's own sentence: it already names the card
+    poll();                                                                   // the badge changes within one poll
+  }
+  // One entry point for both places that draw the buttons; the Agents dialog reaches it through
+  // window.__officeAct with the raw feed agent its row was built from.
+  function officeAct(kind, agent, btn) { return doOfficeAction(kind, agent, btn); }
+  window.__officeAct = officeAct;
+  window.__officeActsHtml = (o, cls) => officeActsHtml(o, cls);
+  window.__officeRunHtml = (o) => runLineHtml(o);
+
+  // seconds -> "45 s" / "12 min" / "3 h" in the page's language: the heartbeat age is in seconds,
+  // which the office's own ago() (whole minutes) cannot say.
+  function runAge(secs) {
+    const n = Math.max(0, Math.round(Number(secs) || 0));
+    const [v, u] = n < 60 ? [n, 'runSecond'] : n < 3600 ? [Math.round(n / 60), 'runMinute'] : [Math.round(n / 3600), 'runHour'];
+    return `${v} ${L[u] || EN[u]}`;
+  }
+  // The live run of the CURRENT attempt: "working" only means working if it can prove a heartbeat.
+  function runLineHtml(s) {
+    const r = s.run;
+    if (!r) return '';
+    const since = Number.isFinite(r.since) ? ago(r.since) : Number.isFinite(r.startedAt) ? ago(r.startedAt * 1000) : '';
+    const hb = runAge(r.heartbeatAgeS);
+    const txt = (r.alive ? (L.runAlive || EN.runAlive)(since || hb, hb) : (L.runDead || EN.runDead)(since || hb, hb))
+      + (Number(r.attempts) > 1 ? ` · ${(L.runAttempt || EN.runAttempt)(r.attempt, r.attempts)}` : '');
+    return `<div class="runline${r.alive ? '' : ' dead'}">${esc(txt)}</div>`;
+  }
+  // The attempts before this one, folded away so a crashed run's steps never read as the live one's.
+  function prevHtml(s) {
+    const ps = Array.isArray(s.previous) ? s.previous : [];
+    if (!ps.length) return '';
+    const one = (p) => {
+      const steps = Array.isArray(p.steps) ? p.steps : [];
+      const when = Number.isFinite(p.since) ? ago(p.since) : Number.isFinite(p.endedAt) ? ago(p.endedAt * 1000) : '';
+      const head = `${p.outcome || 'run'} · ${when} · ${(L.prevSteps || EN.prevSteps)(steps.length)}`;
+      return `<div class="att"><b>${esc(head)}</b>${steps.length ? `<ol>${steps.map(([t, text, d]) => `<li>${esc(text)} <span>· ${esc(ago(t))}${Number.isFinite(d) ? ` · ${(d / 1000).toFixed(d < 10000 ? 1 : 0)} s` : ''}</span></li>`).join('')}</ol>` : ''}</div>`;
+    };
+    const key = `${s.id}#prev`;          // stays open across polls, exactly like the current attempt's steps
+    return `<details class="prev" data-id="${esc(key)}"${openSteps.has(key) ? ' open' : ''}><summary>${esc((L.prevAttempts || EN.prevAttempts)(ps.length))}</summary>${ps.map(one).join('')}</details>`;
+  }
+  // The banner: what is blocked, which card it is (named, so the banner and the row cannot disagree),
+  // how long it has been that way, and the buttons that fix it. Amber for a card that needs a
+  // decision, red for a crashed run. A blocked card shows even while the agent is busy elsewhere —
+  // that is exactly the case a green badge hides — and a dismissed one shows nothing at all.
   function errorBox(s) {
-    const f = s.lastFail;
-    if (!(s.status === 'error' && s.error) && !f) return '';
-    const head = f ? L.lastFail(ago(f.at)) : L.error;
-    const msg = (s.status === 'error' && s.error) || (f && f.error) || '';
-    return `<div class="errbox"><b>⚠ ${esc(head)}</b>${msg ? `<div>${esc(msg)}</div>` : ''}${f && f.code ? `<code>${esc(f.code)}</code>` : ''}${f && f.stderr ? `<pre>${esc(f.stderr)}</pre>` : ''}</div>`;
+    const f = s.lastFail, a = s.attention, t = a && a.task;
+    if (!t && !((s.status === 'error' || s.status === 'waiting') && s.error) && !f) return '';
+    const crashed = !!t && t.kind === 'crashed';
+    const head = t ? (crashed ? L.error : (L.needsYouTitle || EN.needsYouTitle)(s.name))
+      : s.status === 'waiting' ? (L.needsYouTitle || EN.needsYouTitle)(s.name) : f ? L.lastFail(ago(f.at)) : L.error;
+    const msg = s.error && (t || s.status === 'error' || s.status === 'waiting') ? s.error : (f && f.error) || '';
+    const stale = Array.isArray(s.stale) && s.stale.length
+      ? `<div class="errstale">· ${esc((L.staleIgnored || EN.staleIgnored)(s.stale.length))} ${s.stale.map((x) => `<code>${esc(x.id)}</code>`).join(' ')}</div>` : '';
+    return `<div class="errbox${t && !crashed ? ' warn' : ''}"><b>⚠ ${esc(head)}${t ? ` · <code>${esc(t.id)}</code>` : ''}</b>`
+      + `${msg ? `<div>${esc(msg)}</div>` : ''}`
+      + (t && t.title ? `<div class="errtitle" title="${esc(t.title)}">${esc(t.title)}</div>` : '')
+      + (t ? `<div class="errnote">${esc(L[BLOCK_KIND[t.kind]] || BLOCK_KIND[t.kind] || t.kind)}${Number.isFinite(t.since) ? ` · ${esc((L.actSince || EN.actSince)(agoLong(t.since)))}` : ''}</div>` : '')
+      + stale
+      + `${f && f.code ? `<code>${esc(f.code)}</code>` : ''}${f && f.stderr ? `<pre>${esc(f.stderr)}</pre>` : ''}`
+      + officeActsHtml(s) + `</div>`;
   }
   function cardHtml(s, panel = false) {
     const t = s.task;
@@ -3212,7 +3481,7 @@
     const nick = s.realName && s.realName !== s.name ? ` <span class="real">(${esc(s.realName)})</span>` : '';
     return `<div class="top"><span class="sw" style="background:${esc(s.shirt)}"></span><b class="pick" data-id="${id}">${esc(s.name)}</b>${nick}${panel ? '' : `<button type="button" class="edit" data-id="${id}" title="${esc(L.looksName)}" aria-label="${esc(L.looksName)}">✎</button>`}</div>
         <div class="role">${esc(s.role)}${spendHtml(s)}</div>
-        <div class="st"><span class="pill p-${esc(s.status)}">${esc(L[s.status] || s.status)}</span>${taskHtml}${etaHtml(s)}${reply}</div>${note}${errorBox(s)}${stepsHtml(s)}${acts}${away}`;
+        <div class="st"><span class="pill p-${esc(s.status)}">${esc(L[s.status] || s.status)}</span>${taskHtml}${etaHtml(s)}${reply}</div>${runLineHtml(s)}${note}${errorBox(s)}${stepsHtml(s)}${prevHtml(s)}${acts}${away}`;
   }
   // The panel belongs to the selected agent (cam.sel), not to the camera: zooming, panning or the
   // wheel stop the camera from following but keep the panel next to its agent. It is placed right,
@@ -3327,6 +3596,7 @@
   }
   detailEl.addEventListener('click', (e) => {
     if (e.target.closest('.x')) { select(null); return; }
+    const o = e.target.closest('button.oact'); if (o) { officeAct(o.dataset.oact, sprites.get(o.dataset.agent) || o.dataset.agent, o); return; }
     const r = e.target.closest('[data-act]'); if (r) { const s = sprites.get(r.dataset.id); if (s) act(r.dataset.act, s); return; }
     const b = e.target.closest('.edit'); if (b) { const s = sprites.get(b.dataset.id); if (s) openLooks(s); }
   });
@@ -3381,6 +3651,8 @@
   }
 
   cardsEl.addEventListener('click', (e) => {
+    // the same three buttons are drawn on the desk cards; they write through the same helper
+    const o = e.target.closest('button.oact'); if (o) { officeAct(o.dataset.oact, sprites.get(o.dataset.agent) || o.dataset.agent, o); return; }
     const r = e.target.closest('.reply'); if (!r) return;
     const s = sprites.get(r.dataset.id); if (s) openAnswer(s);
   });
@@ -4846,31 +5118,47 @@
 
 <button id="agents-btn" type="button" hidden style="position:fixed;right:12px;bottom:12px;z-index:55;padding:6px 12px;border-radius:18px;border:1px solid #556;background:rgba(20,20,28,.92);color:#eee;font:inherit;cursor:pointer">Agents</button>
 <dialog id="agents-panel" style="width:min(980px,calc(100vw - 24px));max-height:85vh;border:1px solid #556;border-radius:12px;background:#15151d;color:#eee;font:inherit;padding:12px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b id="ag-sum">Agents</b><span><button id="ag-refresh" type="button">Refresh</button> <button id="ag-close" type="button">Close</button></span></div>
+  <div class="ag-head"><div class="ag-titles"><b id="ag-sum">Agents</b><div id="ag-acct"></div></div><span><button id="ag-refresh" type="button">Refresh</button> <button id="ag-close" type="button">Close</button></span></div>
   <div id="ag-body" style="overflow:auto;max-height:70vh"></div>
 </dialog>
 <script>
 (function () {
-  var btn = document.getElementById('agents-btn'), dlg = document.getElementById('agents-panel'), body = document.getElementById('ag-body'), sum = document.getElementById('ag-sum'), timer = null;
+  var btn = document.getElementById('agents-btn'), dlg = document.getElementById('agents-panel'), body = document.getElementById('ag-body'), sum = document.getElementById('ag-sum'), acct = document.getElementById('ag-acct'), timer = null;
   if (!btn || !dlg) return;
   function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function ago(ms) { if (!ms) return ''; var s = Math.max(0, Math.round((Date.now() - ms) / 1000)); if (s < 60) return s + ' ' + W.s; if (s < 3600) return Math.round(s / 60) + ' ' + W.m; if (s < 86400) return Math.round(s / 3600) + ' ' + W.h; return Math.round(s / 86400) + ' ' + W.d; }
   var COLORS = { running: '#2e7d32', waiting: '#b8860b', error: '#b71c1c', idle: '#455a64', paused: '#6a1b9a' };
   // Turkish or English, after the page's own language
   var TR = /^tr/i.test(document.documentElement.lang || '');
+  var NAMES = { running: TR ? 'çalışıyor' : 'working', waiting: TR ? 'karar bekliyor' : 'needs a decision', error: TR ? 'hata' : 'error', idle: TR ? 'boşta' : 'idle', paused: TR ? 'duraklatıldı' : 'paused' };
   var W = TR ? { agents: 'Ajanlar', refresh: 'Yenile', close: 'Kapat', agent: 'Ajan', role: 'Rol', status: 'Durum', task: 'Üzerinde çalıştığı iş', last: 'Son işlem', time: 'Süre',
-      sum: function (n, c, subs) { return n + ' ajan · ' + (c.running || 0) + ' çalışıyor · ' + (c.waiting || 0) + ' karar bekliyor · ' + (c.error || 0) + ' hata · ' + (c.idle || 0) + ' boşta' + (subs ? ' · ' + subs + ' alt ajan' : ''); },
-      ceo: 'Son CEO görevleri', s: 'sn', m: 'dk', h: 'sa', d: 'g', NAMES: { running: 'çalışıyor', waiting: 'karar bekliyor', error: 'hata', idle: 'boşta', paused: 'durdu' } }
+      blockedOn: 'Engellendiği kart', subs: function (n) { return n + ' alt ajan ayrı sayılır'; },
+      countTitle: 'N = çalışıyor + karar bekleyen + hatalı + boşta + duraklatılmış · çalışıyor = şu anda üstlenilmiş bir kart, karar bekleyen = sizin kararınızı bekleyen kart, hatalı = çökmüş bir çalıştırma',
+      // the same words the pills use, so the headline can be read against the rows
+      sum: function (n, c, subs) { return n + ' ajan · ' + (c.running || 0) + ' ' + NAMES.running + ' · ' + (c.waiting || 0) + ' ' + NAMES.waiting + ' · ' + (c.error || 0) + ' ' + NAMES.error + ' · ' + (c.idle || 0) + ' ' + NAMES.idle + ' · ' + (c.paused || 0) + ' ' + NAMES.paused + (subs ? ' · ' + subs + ' alt ajan' : ''); },
+      ceo: 'Son CEO görevleri', s: 'sn', m: 'dk', h: 'sa', d: 'g' }
     : { agents: 'Agents', refresh: 'Refresh', close: 'Close', agent: 'Agent', role: 'Role', status: 'Status', task: 'Working on', last: 'Last step', time: 'For',
-      sum: function (n, c, subs) { return n + ' agents · ' + (c.running || 0) + ' working · ' + (c.waiting || 0) + ' waiting for a decision · ' + (c.error || 0) + ' in error · ' + (c.idle || 0) + ' idle' + (subs ? ' · ' + subs + ' subagents' : ''); },
-      ceo: 'Latest CEO tasks', s: 's', m: 'min', h: 'h', d: 'd', NAMES: { running: 'working', waiting: 'needs a decision', error: 'error', idle: 'idle', paused: 'paused' } };
-  var NAMES = W.NAMES;
+      blockedOn: 'Blocked on', subs: function (n) { return n + ' subagent' + (n === 1 ? '' : 's') + ' counted separately'; },
+      countTitle: 'N = working + waiting + error + idle + paused · working = a task claimed right now, waiting = a card that needs your decision, error = a crashed run',
+      sum: function (n, c, subs) { return n + ' agents · ' + (c.running || 0) + ' ' + NAMES.running + ' · ' + (c.waiting || 0) + ' ' + NAMES.waiting + ' · ' + (c.error || 0) + ' ' + NAMES.error + ' · ' + (c.idle || 0) + ' ' + NAMES.idle + ' · ' + (c.paused || 0) + ' ' + NAMES.paused + (subs ? ' · ' + subs + ' subagents' : ''); },
+      ceo: 'Latest CEO tasks', s: 's', m: 'min', h: 'h', d: 'd' };
   btn.textContent = W.agents; document.getElementById('ag-refresh').textContent = W.refresh; document.getElementById('ag-close').textContent = W.close;
   // Only where this server reads agent feeds (Claude Code, Codex, any JSON feed): not in the demo or inside Paperclip.
   fetch('/config.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
     if (c && (c.sources || []).some(function (x) { return x.kind === 'feed'; }) && !/[?&](demo|kiosk)\b/.test(location.search)) btn.hidden = false;
   }).catch(function () {});
   function taskText(a) { var t = a.task; if (!t) return ''; if (typeof t === 'string') return t; return (t.id ? t.id + ' · ' : '') + (t.title || ''); }
+  // The card behind a waiting/error badge, always named by its id: the office and this table must
+  // never point at two different cards for the same agent.
+  function blockText(a) { var t = a.attention && a.attention.task; if (!t) return ''; return W.blockedOn + ': ' + (t.id || '') + (t.title ? ' · ' + t.title : ''); }
+  // "▼ N more below": on a phone the dialog's body is the only scroller, and a row cut in half at
+  // the bottom edge does not look like there is anything under it.
+  function moreBelow() {
+    if (!body) return;
+    var r = body.getBoundingClientRect(), trs = body.querySelectorAll('tr'), n = 0;
+    for (var i = 0; i < trs.length; i++) { if (trs[i].getBoundingClientRect().bottom > r.bottom + 8) n++; }
+    if (n > 0) body.dataset.more = String(n); else body.removeAttribute('data-more');
+  }
   async function load() {
     var cfg = await fetch('/config.json').then(function (r) { return r.json(); }).catch(function () { return { sources: [] }; });
     var rows = [];
@@ -4880,15 +5168,35 @@
       if (f && f.agents) f.agents.forEach(function (a) { rows.push(a); });
     }
     var runs = await fetch('/api/cubicle/dispatch').then(function (r) { return r.ok ? r.json() : { runs: [] }; }).catch(function () { return { runs: [] }; });
-    var counts = { running: 0, waiting: 0, error: 0, idle: 0 };
-    rows.forEach(function (a) { counts[a.status] = (counts[a.status] || 0) + 1; });
+    // Counted once each, from the status the feed sent, over the agents the headline counts; the
+    // subagents under them are listed but named separately, so the parts always add up.
     var top = rows.filter(function (a) { return !String(a.id).includes(':'); }), subs = rows.length - top.length;
+    var counts = { running: 0, waiting: 0, error: 0, idle: 0, paused: 0 };
+    top.forEach(function (a) { counts[a.status] = (counts[a.status] || 0) + 1; });
     sum.textContent = W.sum(top.length, counts, subs);
+    sum.title = W.countTitle;
+    if (acct) {
+      acct.textContent = '= ' + ['running', 'waiting', 'error', 'idle', 'paused'].map(function (k) { return (counts[k] || 0) + ' ' + (NAMES[k] || k); }).join(' + ')
+        + (subs ? ' · ' + W.subs(subs) : '');
+      acct.title = W.countTitle;
+    }
     rows.sort(function (a, b) { var o = { waiting: 0, error: 1, running: 2, idle: 3 }; return (o[a.status] != null ? o[a.status] : 4) - (o[b.status] != null ? o[b.status] : 4) || String(a.name).localeCompare(String(b.name)); });
     var h = '<table style="width:100%;border-collapse:collapse"><tr style="text-align:left;color:#9ab"><th>' + W.agent + '</th><th>' + W.role + '</th><th>' + W.status + '</th><th>' + W.task + '</th><th>' + W.last + '</th><th>' + W.time + '</th></tr>';
     rows.forEach(function (a) {
       var sub = String(a.id).includes(':'), rec = a.recent && a.recent.length ? a.recent[a.recent.length - 1][1] : '';
-      h += '<tr style="border-top:1px solid #2a2a38"><td style="padding:4px 6px;' + (sub ? 'padding-left:22px;color:#9ab' : '') + '">' + (sub ? '↳ ' : '') + esc(a.name) + '</td><td>' + esc(a.role) + '</td><td><span style="background:' + (COLORS[a.status] || '#455a64') + ';border-radius:8px;padding:1px 8px">' + esc(NAMES[a.status] || a.status) + '</span>' + (a.error ? ' <span style="color:#f99">' + esc(a.error) + '</span>' : '') + '</td><td>' + esc(taskText(a)) + '</td><td style="color:#9ab">' + esc(rec) + '</td><td>' + esc(ago(a.since)) + '</td></tr>';
+      var tt = taskText(a), blk = blockText(a);
+      // the office's own script draws these two lines (its language tables carry the words); this
+      // table still reads on its own when that script did not load.
+      var run = window.__officeRunHtml ? window.__officeRunHtml(a) : '';
+      var acts = window.__officeActsHtml ? window.__officeActsHtml(a, 'agacts') : '';
+      h += '<tr style="border-top:1px solid #2a2a38">'
+        + '<td style="padding:4px 6px;' + (sub ? 'padding-left:22px;color:#9ab' : '') + '" data-l="' + esc(W.agent) + '">' + (sub ? '↳ ' : '') + esc(a.name) + '</td>'
+        + '<td data-l="' + esc(W.role) + '">' + esc(a.role) + '</td>'
+        + '<td data-l="' + esc(W.status) + '" title="' + esc(W.countTitle) + '"><span style="background:' + (COLORS[a.status] || '#455a64') + ';border-radius:8px;padding:1px 8px">' + esc(NAMES[a.status] || a.status) + '</span>' + (a.error ? ' <span style="color:#f99">' + esc(a.error) + '</span>' : '') + '</td>'
+        + '<td class="task" data-l="' + esc(W.task) + '"><span class="tw"' + (tt ? ' title="' + esc(tt) + '"' : '') + '>' + esc(tt) + '</span>'
+        + (blk ? '<div class="blk">⚠ ' + esc(blk) + '</div>' : '') + run + acts + '</td>'
+        + '<td data-l="' + esc(W.last) + '" style="color:#9ab">' + esc(rec) + '</td>'
+        + '<td data-l="' + esc(W.time) + '" style="color:#9ab">' + esc(ago(a.since)) + '</td></tr>';
     });
     h += '</table>';
     if (runs.runs && runs.runs.length) {
@@ -4897,11 +5205,21 @@
       h += '</table>';
     }
     body.innerHTML = h;
+    requestAnimationFrame(moreBelow);          // the rows only have a height once they are in the page
   }
+  // The kanban buttons in a row: the office's script owns the confirm token, the write and the
+  // header line it answers in, so this script only points at the button that was pressed.
+  body.addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button.oact') : null;
+    if (!b || !window.__officeAct) return;
+    window.__officeAct(b.dataset.oact, b.dataset.agent, b);
+  });
+  body.addEventListener('scroll', moreBelow);
+  window.addEventListener('resize', moreBelow);
   btn.onclick = function () { dlg.showModal(); load(); timer = setInterval(load, 4000); };
   document.getElementById('ag-close').onclick = function () { dlg.close(); };
   document.getElementById('ag-refresh').onclick = load;
-  dlg.addEventListener('close', function () { clearInterval(timer); });
+  dlg.addEventListener('close', function () { clearInterval(timer); body.removeAttribute('data-more'); });
 })();
 </script>
 
