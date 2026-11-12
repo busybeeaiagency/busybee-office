@@ -79,12 +79,14 @@ def read_tasks(db_path, now=None):
         tasks = [dict(r) for r in rows]
         ids = {t["id"] for t in tasks}
 
-        blocked_ev = {}
+        blocked_ev, review_ev = {}, {}
         try:
-            for e in con.execute("select task_id, created_at from task_events where kind = 'blocked'"):
+            for e in con.execute("select task_id, kind, created_at from task_events"
+                                 " where kind in ('blocked', 'review_requested', 'review_reopened')"):
                 if e["task_id"] in ids and e["created_at"]:
-                    if int(e["created_at"]) > blocked_ev.get(e["task_id"], 0):
-                        blocked_ev[e["task_id"]] = int(e["created_at"])
+                    bucket = blocked_ev if e["kind"] == "blocked" else review_ev
+                    if int(e["created_at"]) > bucket.get(e["task_id"], 0):
+                        bucket[e["task_id"]] = int(e["created_at"])
         except sqlite3.OperationalError:
             pass
 
@@ -127,7 +129,15 @@ def read_tasks(db_path, now=None):
             blocked_at[t["id"]] = blocked_ev.get(t["id"]) or max(
                 int(t["last_heartbeat_at"] or 0), int(t["started_at"] or 0),
                 int(t["completed_at"] or 0), 0)
-    return {"tasks": tasks, "blocked_at": blocked_at, "runs": runs,
+    # A card in `review` is the operator's own queue (Bart's decision), so it carries the same
+    # "since when" timestamp the blocked cards do — from the review handoff event.
+    review_at = {}
+    for t in tasks:
+        if t["status"] == "review":
+            review_at[t["id"]] = review_ev.get(t["id"]) or max(
+                int(t["last_heartbeat_at"] or 0), int(t["started_at"] or 0),
+                int(t["completed_at"] or 0), int(t["created_at"] or 0), 0)
+    return {"tasks": tasks, "blocked_at": blocked_at, "review_at": review_at, "runs": runs,
             "events_by_run": events_by_run, "comments_by_task": comments}
 
 
@@ -149,6 +159,9 @@ def _block_error(t, kind):
             line = re.sub(r"\bpid\s+\d+\s*", "", err.splitlines()[0]).strip()
             return ("CRASHED: " + line[:120]) if line else "CRASHED: the worker exited and left the card blocked"
         return "CRASHED: the worker exited and left the card blocked"
+    if kind == "review":
+        title = (t.get("title") or "").strip()
+        return ("AWAITING YOUR DECISION: " + title[:90]) if title else "AWAITING YOUR DECISION"
     label = (kind or "needs_input").replace("_", " ")
     return f"BLOCKED: {label}"
 
@@ -278,11 +291,15 @@ def _active_ts_excluding(t, mine):
 
 def _attention_actions(kind):
     A = actions.ACTIONS
-    acts = [{"kind": "restart", "label": A["restart"]["label"], "why": A["restart"]["why"]}]
-    if kind != "crashed":                         # approve == "unblock with a human note", input only
-        acts.append({"kind": "approve", "label": A["approve"]["label"], "why": A["approve"]["why"]})
-    acts.append({"kind": "dismiss", "label": A["dismiss"]["label"], "why": A["dismiss"]["why"]})
-    return acts
+    if kind == "review":
+        # The review column is Bart's decision queue: the same three verbs the #coding review-gate
+        # buttons carry (approve -> complete, reject -> request-changes, restart -> block+unblock).
+        names = ["approve", "reject", "restart"]
+    elif kind == "crashed":
+        names = ["restart", "dismiss"]
+    else:
+        names = ["restart", "approve", "dismiss"]
+    return [{"kind": k, "label": A[k]["label"], "why": A[k]["why"]} for k in names if k in A]
 
 
 def _attention_task(t, kind, block_ts):
@@ -317,9 +334,10 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
     in by office.py so this function stays pure/testable."""
     now = now or time.time()
     chat_by_agent = chat_by_agent or {}
-    blocked_at, runs_map, events_by_run, comments_by_task = {}, {}, {}, {}
+    blocked_at, review_at, runs_map, events_by_run, comments_by_task = {}, {}, {}, {}, {}
     if isinstance(tasks, dict):
         blocked_at = tasks.get("blocked_at") or {}
+        review_at = tasks.get("review_at") or {}
         runs_map = tasks.get("runs") or {}
         events_by_run = tasks.get("events_by_run") or {}
         comments_by_task = tasks.get("comments_by_task") or {}
@@ -334,7 +352,7 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
     agents_out = []
     for agent in roster.AGENTS:
         mine = by_assignee.get(agent["id"], [])
-        running, blocked, queued, done = [], [], [], []
+        running, blocked, review, queued, done = [], [], [], [], []
         for t in mine:
             st = t["status"]
             if st == "running":
@@ -342,29 +360,34 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
                     running.append(t)
             elif st == "blocked":
                 blocked.append(t)
+            elif st == "review":
+                review.append(t)
             elif st in ("ready", "todo"):
                 queued.append(t)
             elif st == "done":
                 done.append(t)
         running.sort(key=lambda t: t["started_at"] or 0, reverse=True)
+        review.sort(key=lambda t: review_at.get(t["id"], 0), reverse=True)
 
-        # Attention vs stale: split blocked cards, dropping the ones that are only history (rule 3)
-        # and the ones an operator dismissed and nothing newer has re-blocked.
+        # Attention vs stale: the cards that need the OPERATOR. Blocked cards split by reason (rule
+        # 2/3) and the review column joins the same lane (Bart's decision queue: approve/reject/
+        # restart). Crashes age out into history once the agent has done newer work; a question —
+        # needs_input or review — stays until someone answers it.
         attention_cards, stale_cards = [], []
-        for t in blocked:
-            kind = _block_kind(t)
-            bts = int(blocked_at.get(t["id"], 0))
+        cards = ([(t, _block_kind(t), int(blocked_at.get(t["id"], 0))) for t in blocked]
+                 + [(t, "review", int(review_at.get(t["id"], 0))) for t in review])
+        for t, kind, bts in cards:
             rec = dismissed_map.get(t["id"])
-            if rec and int(rec.get("block_ts") or 0) >= bts:
+            if kind != "review" and rec and int(rec.get("block_ts") or 0) >= bts:
                 continue                                     # dismissed and nothing newer happened
             if kind == "crashed" and _active_ts_excluding(t, mine) > bts:
                 stale_cards.append((t, kind, bts))           # newer work: that crash is history
             else:
-                # A question stays a question: needs_input needs the operator until it is unblocked,
-                # no matter how much other work the agent has done since. Only crashes age out.
+                # A question stays a question: needs_input and review need the operator until the
+                # card actually moves, no matter how much other work the agent has done since.
                 attention_cards.append((t, kind, bts))
-        # needs_input first, then crashed; newest block_ts first inside a kind (rule 4)
-        attention_cards.sort(key=lambda c: (0 if c[1] != "crashed" else 1, -c[2]))
+        # review first (it IS the decision queue), then needs_input, then crashes; newest first
+        attention_cards.sort(key=lambda c: (0 if c[1] == "review" else 1 if c[1] == "needs_input" else 2, -c[2]))
 
         status, task, error, completed_at = "idle", None, None, None
         attention, run_field, recent, previous = None, None, _fallback_recent(mine), []

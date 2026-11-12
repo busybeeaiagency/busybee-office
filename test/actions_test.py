@@ -111,7 +111,8 @@ class ActionsTest(unittest.TestCase):
         return actions.issue_token(action, task, now or self.now)
 
     def attempt(self, action, task, tok, note=None):
-        """Mirror the route's guard order: rate (read-only) -> token -> record -> perform."""
+        """Mirror the route's guard order: rate (read-only) -> token -> record -> perform.
+        Returns (True, result-dict) or (False, ActionError)."""
         allowed, retry = actions.check_rate(action, task, self.now)
         if not allowed:
             return False, actions.ActionError("rate_limited", 429, f"retry in {retry}s")
@@ -245,7 +246,9 @@ class ActionsTest(unittest.TestCase):
     def test_wrong_token_makes_no_change(self):
         self.add_card(tid="t_3ddd10", block="needs_input", started=self.now - 100)
         real = self.token("restart", "t_3ddd10")
-        ok, reason = actions.consume_token("restart", "t_3ddd10", real[:-1] + "0", self.now)
+        # flip the last char to something it definitely is not (1/16 of tokens already end in '0')
+        wrong = real[:-1] + ("1" if real[-1] != "1" else "2")
+        ok, reason = actions.consume_token("restart", "t_3ddd10", wrong, self.now)
         self.assertFalse(ok)
         self.assertEqual(reason, "bad_token")
         self.assertEqual(self.task_row("t_3ddd10")["status"], "blocked")
@@ -264,6 +267,88 @@ class ActionsTest(unittest.TestCase):
         ok, reason = actions.consume_token("restart", "t_5fff12", tok, self.now + actions.TOKEN_TTL_S + 1)
         self.assertFalse(ok)
         self.assertEqual(reason, "expired_token")
+
+    # ---------- the review column (Bart's decision queue) ----------
+    def test_approve_completes_a_review_card_and_releases_the_child(self):
+        self.add_card(tid="t_c0ffe1", status="review")
+        self.add_card(tid="t_c0ffe2", status="todo")
+        self.con.execute("insert into task_links (parent_id, child_id) values ('t_c0ffe1','t_c0ffe2')")
+        self.con.commit()
+        ok, res = self.attempt("approve", "t_c0ffe1", self.token("approve", "t_c0ffe1"),
+                               note="Merged, looks right.")
+        self.assertTrue(ok, res)
+        self.assertEqual(res["after"], "done")
+        row = self.task_row("t_c0ffe1")
+        self.assertEqual(row["status"], "done")
+        self.assertEqual(row["result"], "Merged, looks right.")     # complete_task records result
+        self.assertIsNotNone(row["completed_at"])
+        kinds = [e[0] for e in self.con.execute(
+            "select kind from task_events where task_id='t_c0ffe1' order by id")]
+        self.assertIn("completed", kinds)
+        # upstream synthesizes a run for a review approval so the handoff survives
+        runs = list(self.con.execute(
+            "select outcome, summary from task_runs where task_id='t_c0ffe1'"))
+        self.assertEqual(runs[0][0], "completed")
+        # the child waiting behind it moves now, not on the next dispatcher tick
+        self.assertEqual(self.task_row("t_c0ffe2")["status"], "ready")
+
+    def test_reject_returns_the_card_to_the_implementer_with_the_reason(self):
+        self.add_card(tid="t_c0ffe3", status="review", assignee="auditor", fails=2)
+        self.add_event("t_c0ffe3", "review_requested", self.now - 400,
+                       payload='{"implementer": "coder", "reviewer": "auditor"}')
+        ok, res = self.attempt("reject", "t_c0ffe3", self.token("reject", "t_c0ffe3"),
+                               note="Tests were not run.")
+        self.assertTrue(ok, res)
+        row = self.task_row("t_c0ffe3")
+        self.assertEqual(row["status"], "ready")
+        self.assertEqual(row["assignee"], "coder")                  # routed back via provenance
+        self.assertEqual(row["consecutive_failures"], 2)            # preserved on purpose
+        ev = list(self.con.execute(
+            "select payload from task_events where task_id='t_c0ffe3' and kind='changes_requested'"
+            " order by id desc limit 1"))
+        payload = json.loads(ev[0][0])
+        self.assertEqual(payload["reason"], "Tests were not run.")
+        self.assertEqual(payload["implementer"], "coder")
+        self.assertEqual(payload["status"], "ready")
+        comment = list(self.con.execute(
+            "select body from task_comments where task_id='t_c0ffe3' order by id desc limit 1"))
+        self.assertTrue(comment[0][0].startswith("CHANGES REQUESTED:"))
+
+    def test_reject_without_review_provenance_keeps_the_assignee(self):
+        self.add_card(tid="t_c0ffe4", status="review", assignee="auditor")
+        ok, res = self.attempt("reject", "t_c0ffe4", self.token("reject", "t_c0ffe4"))
+        self.assertTrue(ok, res)
+        self.assertEqual(self.task_row("t_c0ffe4")["assignee"], "auditor")   # never guessed
+        payload = json.loads(list(self.con.execute(
+            "select payload from task_events where task_id='t_c0ffe4' and kind='changes_requested'"))[0][0])
+        self.assertIsNone(payload["implementer"])
+        self.assertIn("no review_requested provenance", payload["note"])
+
+    def test_reject_and_approve_are_refused_on_the_wrong_card_state(self):
+        self.add_card(tid="t_c0ffe5", block="needs_input", started=self.now - 100)
+        with self.assertRaises(actions.ActionError) as ctx:
+            self.attempt("reject", "t_c0ffe5", self.token("reject", "t_c0ffe5"))
+        self.assertEqual(ctx.exception.code, "not_in_expected_state")
+        self.assertEqual(self.task_row("t_c0ffe5")["status"], "blocked")     # nothing written
+        self.add_card(tid="t_c0ffe6", status="running", started=self.now - 100)
+        with self.assertRaises(actions.ActionError) as ctx:
+            self.attempt("approve", "t_c0ffe6", self.token("approve", "t_c0ffe6"))
+        self.assertEqual(ctx.exception.code, "not_in_expected_state")
+        self.assertEqual(self.task_row("t_c0ffe6")["status"], "running")     # nothing written
+
+    def test_restart_from_review_requeues_it(self):
+        self.add_card(tid="t_c0ffe7", status="review")
+        ok, res = self.attempt("restart", "t_c0ffe7", self.token("restart", "t_c0ffe7"))
+        self.assertTrue(ok, res)
+        self.assertIn(res["after"], ("ready", "review"))            # parent-gated landing
+        self.assertEqual(self.task_row("t_c0ffe7")["status"], res["after"])
+
+    def test_preview_names_the_real_transition(self):
+        self.add_card(tid="t_c0ffe8", status="review")
+        self.assertIn("review -> done", actions.preview("approve", "t_c0ffe8"))
+        self.add_card(tid="t_c0ffe9", block="needs_input", started=self.now - 100)
+        self.assertIn("blocked (needs_input) -> ready", actions.preview("approve", "t_c0ffe9"))
+        self.assertIn("stays blocked", actions.preview("dismiss", "t_c0ffe9"))
 
     # ---------- rate limit + log ----------
     def test_rate_limit_per_task(self):
@@ -322,7 +407,7 @@ class ActionsTest(unittest.TestCase):
         cap = actions.capability()
         self.assertTrue(cap["writable"])
         self.assertIsNone(cap["reason"])
-        self.assertEqual(set(cap["actions"]), {"restart", "approve", "dismiss"})
+        self.assertEqual(set(cap["actions"]), {"restart", "approve", "reject", "dismiss"})
 
     def test_token_ttl_is_120(self):
         self.assertEqual(actions.TOKEN_TTL_S, 120)

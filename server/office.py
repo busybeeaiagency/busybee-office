@@ -157,7 +157,8 @@ class Handler(BaseHTTPRequestHandler):
             meta = actions.ACTIONS[action]
             return self._send(200, {"token": actions.issue_token(action, task),
                                     "expires_in": actions.TOKEN_TTL_S, "action": action,
-                                    "task": task, "label": meta["label"], "why": meta["why"]})
+                                    "task": task, "label": meta["label"], "why": meta["why"],
+                                    "preview": actions.preview(action, task)})
         if path == "/api/appearance":
             return self._send(200, {})
         if path == "/api/cubicle/settings":

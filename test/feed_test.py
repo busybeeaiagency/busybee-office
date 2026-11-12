@@ -206,6 +206,34 @@ class FeedTest(unittest.TestCase):
         self.assertIsNone(maya.get("attention"))
         self.assertNotIn("t_q2", [s["id"] for s in maya.get("stale", [])])
 
+    def test_review_card_leads_the_attention_lane_with_the_decision_buttons(self):
+        # The review column is Bart's own queue: it surfaces before a blocked card, reads as
+        # "waiting for a decision", and carries approve/reject/restart (the #coding gate's verbs).
+        self.add("t_rev_a", "maya", "review", title="Ship the patch?", started=self.now - 900)
+        self.ev("t_rev_a", "review_requested", self.now - 800)
+        self.add("t_q_a", "maya", "blocked", title="Which port?", block="needs_input",
+                 started=self.now - 700)
+        self.ev("t_q_a", "blocked", self.now - 650)
+        maya = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now), "maya")
+        self.assertEqual(maya["status"], "waiting")
+        self.assertEqual(maya["attention"]["task"]["id"], "t_rev_a")
+        self.assertEqual(maya["attention"]["task"]["kind"], "review")
+        self.assertEqual([a["kind"] for a in maya["attention"]["actions"]],
+                         ["approve", "reject", "restart"])
+        self.assertIn("AWAITING YOUR DECISION", maya.get("error", ""))
+
+    def test_review_card_counts_as_waiting_even_when_the_agent_is_live(self):
+        self.add("t_rev_b", "coder", "review", title="Ready for your eye", started=self.now - 900)
+        self.ev("t_rev_b", "review_requested", self.now - 850)
+        self.add("t_live_b", "coder", "running", title="Next thing", started=self.now - 300,
+                 expires=self.now + 600, hb=self.now - 15)
+        self.add_run(310, "t_live_b", started=self.now - 300, ended=None, hb=self.now - 15,
+                     expires=self.now + 600)
+        coder = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now), "coder")
+        self.assertEqual(coder["status"], "running")                 # badge stays truthful
+        self.assertEqual(coder["attention"]["task"]["id"], "t_rev_b")  # decision still surfaced
+        self.assertNotIn("t_rev_b", coder.get("stale", []))
+
     def test_run_row_is_the_liveness_truth(self):
         # task columns say the claim expired; the OPEN run row's recent heartbeat says alive.
         self.add("t_r1", "auditor", "running", title="Live audit", started=self.now - 120,

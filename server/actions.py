@@ -1,12 +1,22 @@
-"""Operator actions on kanban cards: restart / approve / dismiss — direct DB writes.
+"""Operator actions on kanban cards: restart / approve / reject / dismiss — direct DB writes.
 
 The hermes CLI is NOT installed in the office container, so these mirror the exact writes from
 `/opt/hermes/hermes_cli/kanban_db.py` by hand: `unblock_task` (:3557) for restart/approve,
-`add_comment` (:1671) for the approve note, `_end_run`/`_reclaim_dangling_run` (:1857/:3527) for
-closing a leaked run, `_resume_status_from_events` (:2018) for where a card resumes, and
-`_parents_satisfied` (:2100) for the ready-vs-todo landing. The hermes CLI would do the same thing
-on the next dispatch tick; doing it here is what makes the badge flip in the *next poll* instead of
-whenever the dispatcher next wakes.
+`complete_task` (:2640, review approval) for approve on a card in review, `request_changes`
+(:3408) for reject, `add_comment` (:1671) for the note, `_end_run`/`_reclaim_dangling_run`
+(:1857/:3527) for closing a leaked run, `_synthesize_ended_run` for a review approval with no run,
+`_resume_status_from_events` (:2018) for where a card resumes, `_parents_satisfied` (:2100) and
+`recompute_ready` (:2036) for the ready-vs-todo landing and releasing children. The hermes CLI
+would do the same thing on the next dispatch tick; doing it here is what makes the badge flip in
+the *next poll* instead of whenever the dispatcher next wakes.
+
+Where the review column is involved the dashboard offers the same three decisions as the
+#coding review gate (`/opt/data/scripts/kanban_review_gate.py` -> `hermes kanban complete /
+request-changes / block+unblock`), so both surfaces land the card in the same place. One
+deliberate difference: upstream `request_changes` only accepts a *live* reviewer run, while a card
+resting in `review` (the normal state of that column) has none — reject handles that state, keeps
+the handoff provenance and parent gating, and records `note: no review_requested provenance` when
+the card entered review without one instead of guessing an implementer.
 
 Every write runs in ONE `BEGIN IMMEDIATE` transaction with `busy_timeout=5000`, an `isolation_level`
 of None (we own the transaction), and a `WHERE` guard on the status we expect — so a write is
@@ -23,14 +33,18 @@ import time
 
 from . import state
 
-# The three operator actions and how the UI labels/explains each one.
+# The operator actions and how the UI labels/explains each one. The review column gets
+# approve/reject/restart (the same decisions the #coding review-gate buttons offer); a blocked
+# card gets restart/approve/dismiss. Which set appears is the feed's choice per card.
 ACTIONS = {
-    "restart": {"label": "Restart task",
-                "why": "unblock the card so the dispatcher retries it"},
-    "approve": {"label": "Approve",
-                "why": "leave a note and unblock the card so it runs again"},
+    "restart": {"label": "🔄 Restart task",
+                "why": "unblock the card (or re-open the review) so the dispatcher picks it up fresh"},
+    "approve": {"label": "✅ Approve",
+                "why": "a card in review: mark it done; a blocked card: leave your note and unblock it"},
+    "reject": {"label": "❌ Reject",
+               "why": "send the reviewed card back to its implementer with your reason"},
     "dismiss": {"label": "Dismiss",
-                "why": "close the crashed run and clear the badge"},
+                "why": "close the crashed run and clear the badge (the card stays blocked)"},
 }
 
 TASK_ID_RE = re.compile(r"^t_[0-9a-f]{6,}$", re.IGNORECASE)
@@ -148,6 +162,59 @@ def record_hit(action, task, now=None):
         state.save(s)
 
 
+def preview(action, task):
+    """One honest sentence about what this button will do to THIS card, right now.
+
+    The confirm dialog shows this before the token is spent, so the operator approves the real
+    transition (review -> done, blocked -> ready) rather than a generic label. Read-only, and it
+    degrades to the action's own `why` when the card cannot be read.
+    """
+    meta = ACTIONS.get(action) or {}
+    if not TASK_ID_RE.match(task or ""):
+        return meta.get("why", "")
+    try:
+        con = sqlite3.connect(f"file:{_paths()['db']}?mode=ro", uri=True, timeout=3)
+        con.row_factory = sqlite3.Row               # the caller reads columns by name
+        try:
+            row = con.execute("select status, assignee, block_kind from tasks where id = ?",
+                              (task,)).fetchone()
+        finally:
+            con.close()
+    except Exception:                                     # noqa: BLE001 - preview never breaks a write
+        row = None
+    if not row:
+        return f"{task}: card not found"
+    status, assignee, block_kind = row["status"], row["assignee"], (row["block_kind"] or "")
+    if action == "approve":
+        if status == "review":
+            return f"{task}: review -> done (marks the card complete, releases its children)"
+        if status == "blocked":
+            return f"{task}: blocked ({block_kind or 'needs input'}) -> ready, with your note as a comment"
+        return f"{task}: approve needs a review or blocked card (it is {status})"
+    if action == "reject":
+        if status != "review":
+            return f"{task}: reject needs a review card (it is {status})"
+        try:
+            con = sqlite3.connect(f"file:{_paths()['db']}?mode=ro", uri=True, timeout=3)
+            con.row_factory = sqlite3.Row
+            try:
+                impl = _review_provenance(con, task)
+            finally:
+                con.close()
+        except Exception:                                 # noqa: BLE001
+            impl = None
+        return (f"{task}: review -> ready, back to {impl}" if impl
+                else f"{task}: review -> ready (no review handoff found; assignee stays {assignee})")
+    if action == "dismiss":
+        return (f"{task}: the error badge clears and the open run is closed; the card stays {status}"
+                if status == "blocked" else f"{task}: dismiss needs a blocked card (it is {status})")
+    if action == "restart":
+        if status in ("blocked", "review", "scheduled"):
+            return f"{task}: {status} -> ready, the dispatcher picks it up fresh"
+        return f"{task}: restart needs a blocked or review card (it is {status})"
+    return meta.get("why", "")
+
+
 def performed_count():
     with state.locked():
         return len(state.load().get("hits") or [])
@@ -248,10 +315,120 @@ def _block_ts(con, task, now):
                int((r["completed_at"] or 0) if r else 0), 0)
 
 
+def _review_provenance(con, task):
+    """The implementer a reviewed card must go back to: the newest `review_requested` event
+    (upstream `request_changes` :3408 requires this provenance; a card that entered review some
+    other way has none, and then the assignee is left alone rather than guessed at)."""
+    try:
+        row = con.execute("select payload from task_events where task_id = ? and"
+                          " kind in ('review_requested', 'review_reopened') order by id desc limit 1",
+                          (task,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    impl = _json_or_empty(row["payload"] if row else None).get("implementer")
+    impl = (str(impl) or "").strip() if impl else ""
+    return impl or None
+
+
+def _close_run(con, run_id, now, outcome, summary):
+    """`_end_run` (:1857): stamp the run closed with its outcome and the handoff summary."""
+    con.execute("update task_runs set status=?, outcome=?, summary=?, ended_at=?,"
+                " claim_lock=NULL, claim_expires=NULL, worker_pid=NULL where id = ?",
+                (outcome, outcome, summary, int(now), run_id))
+
+
+def _synthesize_run(con, task, now, summary, metadata=None):
+    """`_synthesize_ended_run`: a never-claimed card still gets a run row so the handoff survives."""
+    cur = con.execute("insert into task_runs (task_id, started_at, ended_at, status, outcome,"
+                      " summary, last_heartbeat_at) values (?,?,?,?,?,?,?)",
+                      (task, int(now), int(now), "completed", "completed", summary, int(now)))
+    return cur.lastrowid
+
+
+def _recompute_ready(con, task, now):
+    """`recompute_ready` (:2036), narrowed to this card's direct children: a child waiting in
+    `todo` becomes `ready` once every parent is done/archived, so finishing a reviewed card
+    releases the next card on the very next poll instead of on the next dispatcher tick."""
+    moved = []
+    rows = con.execute(
+        "select c.id from task_links l join tasks c on c.id = l.child_id"
+        " where l.parent_id = ? and c.status = 'todo'", (task,)).fetchall()
+    for r in rows:
+        child = r["id"]
+        if _parents_satisfied(con, child):
+            con.execute("update tasks set status = 'ready' where id = ? and status = 'todo'", (child,))
+            _add_event(con, child, "promoted", now, payload={"reason": f"parent {task} done"})
+            moved.append(child)
+    return moved
+
+
+def _do_complete(con, task, row, note, now):
+    """`complete_task` (:2640) as the CLI's `complete` does it for a card resting in `review`
+    (human approval, exempt from the evidence gate): -> done, result recorded, run closed or
+    synthesized, `completed` event, failure counter wiped, children released."""
+    if row["status"] != "review":
+        raise ActionError("not_in_expected_state", 409, f"{task} is {row['status']}, not in review")
+    result = (note or "").strip() or "Approved by Bart from the BUSY BEE office dashboard"
+    cur = con.execute(
+        "update tasks set status = 'done', result = ?, completed_at = ?, claim_lock = NULL,"
+        " claim_expires = NULL, worker_pid = NULL, block_kind = NULL, block_recurrences = 0,"
+        " consecutive_failures = 0 where id = ? and status = 'review'",
+        (result[:500], int(now), task))
+    if cur.rowcount == 0:
+        raise ActionError("not_in_expected_state", 409, f"{task} changed state mid-write")
+    run_id = _open_run(con, task)
+    if run_id is not None:
+        _close_run(con, run_id, now, "completed", result[:500])
+    else:
+        # upstream synthesizes the run for a review approval so the handoff fields survive
+        run_id = _synthesize_run(con, task, now, result[:500])
+    _add_event(con, task, "completed", now, run_id=run_id,
+               payload={"result": result[:500], "source_status": "review", "approval": "manual"})
+    released = _recompute_ready(con, task, now)
+    return {"before": "review", "after": "done", "run_id": run_id, "released": released,
+            "detail": "approved -> done" + (f"; released {', '.join(released)}" if released else "")}
+
+
+def _do_reject(con, task, row, note, now):
+    """`request_changes` (:3408) as the CLI's `request-changes` does it: the card goes back to the
+    implementer named by the review handoff, parent gating re-applied, the reason recorded, and the
+    failure counter deliberately PRESERVED (a review transition is not evidence the pathology
+    cleared). Upstream only accepts a *live* reviewer run; a card resting in `review` — the normal
+    state of the review column — has none, so this path handles it and says so in the payload."""
+    if row["status"] != "review":
+        raise ActionError("not_in_expected_state", 409,
+                          f"{task} is {row['status']}, not awaiting review")
+    reason = (note or "").strip() or "Rejected from the BUSY BEE office dashboard."
+    implementer = _review_provenance(con, task)
+    new_status = "ready" if _parents_satisfied(con, task) else "todo"
+    cur = con.execute(
+        "update tasks set status = ?, assignee = COALESCE(?, assignee), claim_lock = NULL,"
+        " claim_expires = NULL, worker_pid = NULL, current_run_id = NULL, block_kind = NULL,"
+        " block_recurrences = 0 where id = ? and status = 'review'",
+        (new_status, implementer, task))
+    if cur.rowcount == 0:
+        raise ActionError("not_in_expected_state", 409, f"{task} changed state mid-write")
+    run_id = _open_run(con, task)
+    if run_id is not None:
+        _close_run(con, run_id, now, "changes_requested", reason[:500])
+    _add_event(con, task, "changes_requested", now, run_id=run_id,
+               payload={"reason": reason[:500], "implementer": implementer,
+                        "reviewer": row["assignee"], "status": new_status,
+                        "note": None if implementer else "no review_requested provenance; assignee kept"})
+    author = "bart (office dashboard)"
+    con.execute("insert into task_comments (task_id, author, body, created_at) values (?, ?, ?, ?)",
+                (task, author, ("CHANGES REQUESTED: " + reason)[:500], int(now)))
+    _add_event(con, task, "commented", now, payload={"author": author, "len": len(reason) + 20})
+    return {"before": "review", "after": new_status, "run_id": run_id,
+            "implementer": implementer,
+            "detail": f"rejected -> {new_status}"
+                      + (f", back to {implementer}" if implementer else " (assignee unchanged)")}
+
+
 def _do_restart(con, task, row, now):
     before = row["status"]
-    if before not in ("blocked", "scheduled"):
-        raise ActionError("not_in_expected_state", 409, f"{task} is {before}, not blocked")
+    if before not in ("blocked", "scheduled", "review"):
+        raise ActionError("not_in_expected_state", 409, f"{task} is {before}, not blocked or in review")
     run_id = _open_run(con, task)
     if run_id is not None:
         _reclaim_run(con, run_id, now, "invariant recovery on unblock")
@@ -263,7 +440,7 @@ def _do_restart(con, task, row, now):
         new_status = "ready" if parents_ok else "todo"
     cur = con.execute(
         "update tasks set status = ?, current_run_id = NULL, consecutive_failures = 0,"
-        " last_failure_error = NULL where id = ? and status in ('blocked', 'scheduled')",
+        " last_failure_error = NULL where id = ? and status in ('blocked', 'scheduled', 'review')",
         (new_status, task),
     )
     if cur.rowcount == 0:
@@ -327,15 +504,21 @@ def perform(action, task, *, agent=None, note=None, actor="dashboard"):
     try:
         con.execute("begin immediate")
         try:
-            row = con.execute("select id, status, current_run_id, block_kind from tasks where id = ?",
-                              (task,)).fetchone()
+            row = con.execute("select id, status, assignee, current_run_id, block_kind from tasks"
+                              " where id = ?", (task,)).fetchone()
             if not row:
                 raise ActionError("task_missing", 404, f"no such task: {task}")
             now = time.time()
             if action == "dismiss":
                 result = _do_dismiss(con, task, row, now)
+            elif action == "reject":
+                result = _do_reject(con, task, row, note, now)
             elif action == "approve":
-                result = _do_approve(con, task, row, note, now)
+                # 'review' is Bart's decision queue: approve means COMPLETE the card (upstream
+                # complete_task accepts review for human approval). On a blocked card the same
+                # button means "here is my answer, unblock it" — the note path.
+                result = (_do_complete(con, task, row, note, now) if row["status"] == "review"
+                          else _do_approve(con, task, row, note, now))
             else:
                 result = _do_restart(con, task, row, now)
             con.execute("commit")
