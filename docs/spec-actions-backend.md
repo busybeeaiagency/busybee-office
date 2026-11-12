@@ -19,6 +19,11 @@ module docstrings that explain the *rule*, not the syntax.
      `CRASHED: ` + the first line of `last_failure_error` (strip `pid <n> `, cap 120 chars),
      falling back to `CRASHED: the worker exited and left the card blocked`.
      A crash row must **never** say "needs input".
+   - a third and final case, because it is real: blocked with **no** `block_kind` and **no**
+     failure evidence at all (an operator/agent blocked the card by hand, e.g. the test cards) →
+     treat it as `needs_input` (`kind = "needs_input"`, text `BLOCKED: needs input`).
+     One formula: `kind = "crashed" if (not block_kind and (consecutive_failures or
+     last_failure_error)) else (block_kind or "needs_input")`.
 3. **Stale badges (Bart's fix #1).** A blocked card raises a badge only while it is the *current*
    state of that agent. Compute `block_ts(card)` = created_at of the newest `blocked`
    `task_events` row for the card; fall back to
