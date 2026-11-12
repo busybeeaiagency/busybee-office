@@ -174,6 +174,33 @@ e. Nothing may overlap at 390 px: verify with a screenshot that (i) the header c
    not cover the bottom card, (v) every error/waiting badge on the map is directly above a named
    desk.
 
+## 6. Live-run truth on the card (spec `docs/spec-feed-liveness.md`, fields `run`, `previous`,
+## `dismissedTasks`) — Bart's items 5, 6, 7
+
+- Under the status line, when `s.run` exists, add one small line (`.runline`):
+  `▶ started <ago(s.run.startedAt)> ago · alive, <heartbeatAgeS formatted> · attempt 2 of 3`
+  — when `s.run.alive` is false render `⏱ started … ago · no heartbeat for <age>` in amber instead.
+  `attempt`/`attempts` are printed only when `attempts > 1`. Use the existing `ago()`-style helper
+  in the main script (do not duplicate it; reuse whatever already formats "12 min").
+- `stepsHtml(s)` renders `s.recent` exactly as today (= the CURRENT attempt only). Add below it,
+  when `s.previous && s.previous.length`, a native disclosure element so the crashed attempts stay
+  one tap away but never mixed in:
+  `<details class="prev"><summary>previous attempts (2)</summary>…</details>` — one block per
+  attempt: `<outcome> · <ago> · <n> steps` and its `steps` list, muted, `max-height:12em; overflow:auto`.
+  i18n: `L.prevAttempts` (EN+TR, English fallback).
+- The "Working on" line must only ever name a live-claimed card (`entry.task` from the backend is
+  now guaranteed to be the live claim). In the Agents dialog rows (`taskText` in the bottom script)
+  use `a.task` for the "Working on" cell and, when `a.attention`, add a second labelled line
+  `Blocked on: t_xxxxxxxx · <title>` (`W.blockedOn`, EN+TR). Cells that name a card must carry the
+  id, never a bare title.
+- Top-level `dismissedTasks: ["t_…"]`: when a card id is in it, drop any stale link the sprite still
+  holds (`s.attention`/`s.task` whose `id` is listed → clear it and re-render) and skip it in the
+  dialog rows. This is what stops an archived duplicate (Bart's `t_9d94a9fa`) from living on a card
+  after the backend stopped reporting it.
+- `orchestrating`: when the backend sends `task` without an `id` (the CEO case), render the title as
+  plain text — never as a task link, and never with a `t_…` pill (`issueUrl(t)` is empty for it, so
+  the `Open task` button must also disappear).
+
 ## Constraints
 
 - ES2019 syntax only in `index.html` (no optional chaining beyond what is already used, no
