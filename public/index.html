@@ -1150,6 +1150,9 @@
   // ---------- setup ----------
   const T = 16, BASE_CW = 352;
   let CW = BASE_CW, CH = 208;          // grows with the desks: a row down, or a wing to the left
+  // A theme may replace the whole floor plan (see theme.plan below). ROOM_CW is the width the
+  // room is drawn in (BASE_CW for a stock theme, wider/narrower for a custom plan).
+  let ROOM_CW = BASE_CW, ROOM_PLAN = '', LOUNGE_X = 15 * T;
   // A wide office has extra wings of desks on the left; the original room (desks, partition,
   // lounge) sits to their right, OX office pixels in. Themes draw that room as always, shifted.
   let OX = 0;
@@ -1206,11 +1209,23 @@
     }
     CW = BASE_CW + OX;
     CH = (13 + (rows - 3) * 3.5) * T;
+    // A theme may replace the whole floor plan: desks in named rooms instead of one open office.
+    // It returns tiles ([x, y] per desk), lounge spots, the canvas size and a plan id; anything it
+    // leaves out keeps the stock layout.
+    if (theme && theme.plan) {
+      const p = theme.plan({ T, BASE_CW, WING, n, rows, wings, OX, target: want, sprites: [...sprites.values()] });
+      if (p) {
+        DESKS = p.desks; if (p.lounge) LOUNGE = p.lounge;
+        CW = ROOM_CW = p.CW; CH = p.CH; ROOM_PLAN = p.id || 'custom';
+        WINGS = p.wings || 1; ROWS = p.rows || 1; OX = p.OX || 0; if (p.loungeX) LOUNGE_X = p.loungeX;
+      }
+    }
     walk = null; queueKey = '';
     resizeCanvas();
     // agents keep their order and walk over to their desk in the new layout
     const shift = humanOn() ? 1 : 0;
-    [...sprites.values()].sort((x, y) => x.idx - y.idx).forEach((sp, i) => { sp.desk = DESKS[(i + shift) % DESKS.length]; });
+    const pickDesk = (sp, i, raw) => (theme && theme.pickDesk && (theme.pickDesk(sp, DESKS, raw) || DESKS[(i + shift) % DESKS.length])) || DESKS[(i + shift) % DESKS.length];
+    [...sprites.values()].sort((x, y) => x.idx - y.idx).forEach((sp, i) => { sp.desk = pickDesk(sp, i, sp); });
   }
   window.addEventListener('resize', () => { if (AGENTS) layoutFor(AGENTS); });
   function resizeCanvas() {
@@ -2457,7 +2472,11 @@
       }
       s.recent = a.recent || null;
       s.idx = idx;
-      s.desk = DESKS[(idx + shift) % DESKS.length];
+      s.room = a.room || s.room || '';
+      // A theme may seat an agent at a desk that belongs to its room; the stock layout falls back
+      // to desk order.
+      s.desk = (theme && theme.pickDesk && (theme.pickDesk(s, DESKS, a) || DESKS[(idx + shift) % DESKS.length])) || DESKS[(idx + shift) % DESKS.length];
+      if (a.chat && a.chat !== s.lastChat) { s.lastChat = a.chat; setBubble(s, String(a.chat).slice(0, 140), '', 20); }
       s.realName = s.name = a.name;            // applyLook may show a name chosen in Cubicle instead
       s.urlKey = a.urlKey !== undefined ? a.urlKey || '' : undefined;
       s.lastFail = a.lastFail || null;
@@ -2720,7 +2739,7 @@
   const DEFAULT_OBSTACLES = () => [[16.7 * T, 6.8 * T, 20.9 * T, 8.6 * T], [15.8 * T, 2.2 * T, 20.8 * T, 3.5 * T]];
   let walk = null;
   function walkGrid() {
-    const key = `${DESKS.length}:${CH}:${OX}:${theme.id}`;
+    const key = `${DESKS.length}:${CH}:${OX}:${ROOM_PLAN}:${theme.id}`;
     if (walk && walk.key === key) return walk;
     const cols = Math.ceil(CW / CELL), rows = Math.ceil(CH / CELL), solid = new Uint8Array(cols * rows);
     const block = (x0, y0, x1, y1) => {
@@ -2728,9 +2747,10 @@
         for (let cx = Math.max(0, Math.floor(x0 / CELL)); cx < Math.min(cols, Math.ceil(x1 / CELL)); cx++) solid[cy * cols + cx] = 1;
     };
     block(0, 0, CW, 2 * T + 4);
-    block(OX + 14 * T + 6, 2 * T, OX + 14 * T + 10, 6 * T); block(OX + 14 * T + 6, 8 * T, OX + 14 * T + 10, CH);
+    // A custom plan draws its own walls (through obstacles()); the stock partition stays stock.
+    if (!ROOM_PLAN) { block(OX + 14 * T + 6, 2 * T, OX + 14 * T + 10, 6 * T); block(OX + 14 * T + 6, 8 * T, OX + 14 * T + 10, CH); }
     for (const d of DESKS) block(d[0] * T, d[1] * T + 8, d[0] * T + 34, d[1] * T + 21);
-    for (const r of (theme.obstacles ? theme.obstacles({ T, CW: BASE_CW, CH }) : DEFAULT_OBSTACLES())) block(r[0] + OX, r[1], r[2] + OX, r[3]);
+    for (const r of (theme.obstacles ? theme.obstacles({ T, CW: ROOM_CW, CH }) : DEFAULT_OBSTACLES())) block(r[0] + OX, r[1], r[2] + OX, r[3]);
     return (walk = { key, cols, rows, solid });
   }
   // Breadth-first search (8 directions, no cutting corners), then drop the points a straight
@@ -3012,7 +3032,7 @@
   // Where the line forms: in front of the human desk, along the aisle towards the doorway.
   let queueKey = '', queueList = [];
   function queueSpots() {
-    const key = `${DESKS.length}:${CH}:${OX}:${theme.id}`;
+    const key = `${DESKS.length}:${CH}:${OX}:${ROOM_PLAN}:${theme.id}`;
     if (key === queueKey) return queueList;
     const w = walkGrid(), d = DESKS[0], y = d[1] * T + 36, out = [];
     const free = (x, yy) => { const cx = Math.floor(x / CELL), cy = Math.floor(yy / CELL); return cx >= 0 && cy >= 0 && cx < w.cols && cy < w.rows && !w.solid[cy * w.cols + cx]; };
@@ -3029,7 +3049,7 @@
   const short = (t, n = 34) => (t && t.length > n ? t.slice(0, n - 1) + '…' : t || '');
   function standFree(x, y) {
     const w = walkGrid(), cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
-    return x > OX + 15 * T + 4 && x < CW - 8 && y > 3 * T && y < CH - 6 && !w.solid[cy * w.cols + cx];
+    return x > OX + LOUNGE_X * T + 4 && x < CW - 8 && y > 3 * T && y < CH - 6 && !w.solid[cy * w.cols + cx];
   }
   function chatScript(a, b) {
     const t = L.talk; if (!t) return null;
@@ -3049,7 +3069,7 @@
     if (L.pairs && L.pairs.length) { const [q, r] = pick(L.pairs); topics.push([[0, q], [1, r]]); }
     return topics.length ? pick(topics) : null;
   }
-  const onBreak = (o, now) => o.status === 'idle' && !o.chat && !o.seated && o.x > OX + 15 * T && !(o.meetUntil > now);
+  const onBreak = (o, now) => o.status === 'idle' && !o.chat && !o.seated && o.x > OX + LOUNGE_X * T && !(o.meetUntil > now);
   function startChat(a, now) {
     if (!onBreak(a, now) || now - (a.lastChat || 0) < 35) return false;
     const mates = [...sprites.values()].filter((o) => o !== a && onBreak(o, now) && !o.walking && now - (o.lastChat || 0) > 35)
@@ -3682,7 +3702,7 @@
     g.imageSmoothingEnabled = !!theme.smooth;
     g.clearRect(0, 0, CW, CH);
     const hr = new Date().getHours();
-    const c = { g, t: now, T, CW: BASE_CW, CH, night: hr < 7 || hr >= 20, opts: themeOpts, sprites, desks: DESKS, lounge: LOUNGE, company: officeName, lang, logo: imageOf(looks.logo),
+    const c = { g, t: now, T, CW: ROOM_CW, CH, night: hr < 7 || hr >= 20, opts: themeOpts, sprites, desks: DESKS, lounge: LOUNGE, company: officeName, lang, logo: imageOf(looks.logo),
       anyError: [...sprites.values()].some((s) => s.status === 'error') };
     // Wings: the desk half of the room again, once per wing, then the room itself shifted right.
     for (let w = 0; w < WINGS - 1; w++) {
@@ -3707,7 +3727,7 @@
     }
     if (!hum) hideHuman();
     if (hum) { placeHuman(line.length); byDesk.set(DESKS[0], human); list.push({ z: human.y, f: () => theme.drawChar(c, human) }); }
-    const deskCount = Math.max(4, Math.min(DESKS.length, Math.ceil((sprites.size + (hum ? 1 : 0)) / 4) * 4));
+    const deskCount = theme.allDesks ? DESKS.length : Math.max(4, Math.min(DESKS.length, Math.ceil((sprites.size + (hum ? 1 : 0)) / 4) * 4));
     DESKS.slice(0, deskCount).forEach((d) => list.push({ z: d[1] * T + 21, f: () => theme.drawDesk(c, d, byDesk.get(d)) }));
     for (const s of sprites.values()) list.push({ z: s.y, f: () => theme.drawChar(c, s) });
     syncPets(); stepPets(dt, now, c.night);

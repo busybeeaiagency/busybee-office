@@ -1,5 +1,10 @@
 # Cubicle
 
+> **BUSY BEE fork:** this repo is the BUSY BEE animated office dashboard (five rooms fed by
+> `kanban.db`, Mattermost, Beszel and Uptime Kuma), served at http://10.10.10.202:9120.
+> Everything below is the upstream cubicle documentation; the fork's own docs, data-endpoint
+> map and deploy instructions are in **[README-DASHBOARD.md](README-DASHBOARD.md)**.
+
 **A live pixel-art office for your AI agents.** Works with [Paperclip](https://github.com/paperclipai/paperclip), [Claude Code](https://claude.com/claude-code), or any tool that can write a small JSON file.
 
 <p align="center"><a href="https://caglarutkuguler.github.io/cubicle/?lang=en"><img src="docs/demo-button.svg" alt="▶ Try the live demo" width="380"></a></p>
