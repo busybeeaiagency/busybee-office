@@ -35,7 +35,7 @@ AGENTS = [
     {"id": "researcher", "name": "\U0001f7e2 researcher", "role": "Research & reporting",
      "home_room": "research", "color": "#22c55e", "mm": "researcher"},
     {"id": "orchestrator", "name": "\U0001f7e1 orchestrator", "role": "Hermes orchestrator (CEO)",
-     "home_room": "art", "color": "#eab308", "mm": "hermes"},
+     "home_room": "art", "color": "#eab308", "mm": "hermes", "ceo": True},
 ]
 
 # Task-title keywords that send a working agent to a different room than its home room.

@@ -6,6 +6,9 @@ Endpoints (the page discovers the feed through /config.json):
   GET  /api/feed, /api/feed/0  the live roster built from /hermes/kanban.db
   GET  /api/office/vitals    host + services + Beszel + Kuma (cached 15 s)
   GET  /api/office/chat      Mattermost presence + latest #off-topic posts (1 req/min)
+  GET  /api/office/actions   whether writes are allowed and which actions exist (capability)
+  GET  /api/office/confirm   mint a single-use confirm token for one (action, task)  [x-cubicle]
+  POST /api/office/action    perform restart/approve/dismiss on a card               [x-cubicle]
   GET  /healthz              liveness for the container
   GET  /api/appearance       {} (looks live in the browser's localStorage)
   GET  /api/cubicle/settings {"createTasks": false, ...}
@@ -20,11 +23,11 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server import feed, roster, sources  # noqa: E402
+from server import actions, feed, roster, sources  # noqa: E402
 
 PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
 DB_PATH = os.environ.get("OFFICE_DB", f"{sources.HERMES_DIR}/kanban.db")
@@ -57,7 +60,9 @@ def current_feed():
             msg = (post.get("message") or "").strip()
             if user and msg:
                 chat[user] = msg[:140]
-        data = feed.build_feed(feed.read_tasks(DB_PATH), chat_by_agent=chat)
+        data = feed.build_feed(feed.read_tasks(DB_PATH), chat_by_agent=chat,
+                               previous_agents=(_feed["data"] or {}).get("agents"),
+                               gateway=sources_api.gateway_alive())
         with _lock:
             _feed.update({"at": time.time(), "data": data, "error": ""})
         return data
@@ -70,13 +75,21 @@ def current_feed():
         return {"company": feed.COMPANY, "agents": []}
 
 
+def _clean_note(note):
+    """Operator note: strip control chars, trim, cap at 500. Never carries a credential through."""
+    if not isinstance(note, str):
+        return ""
+    return "".join(ch for ch in note if ord(ch) >= 32).strip()[:500]
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "busybee-office"
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[http] %s %s\n" % (self.address_string(), fmt % args))
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store",
+              retry_after=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
@@ -86,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -123,7 +138,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/office/chat":
             return self._send(200, sources_api.chatter())
         if path == "/healthz":
-            return self._send(200, {"ok": True, "db": os.path.exists(DB_PATH), "agents": len(current_feed()["agents"])})
+            cap = actions.capability()
+            return self._send(200, {"ok": True, "db": os.path.exists(DB_PATH),
+                                    "agents": len(current_feed()["agents"]),
+                                    "writable": cap["writable"],
+                                    "actions": actions.performed_count()})
+        if path == "/api/office/actions":
+            return self._send(200, actions.capability())
+        if path == "/api/office/confirm":
+            if (self.headers.get("x-cubicle") or "").strip() != "1":
+                return self._send(403, {"error": "x-cubicle required"})
+            q = parse_qs(urlparse(self.path).query)
+            action = (q.get("action") or [""])[0]
+            task = (q.get("task") or [""])[0]
+            if action not in actions.ACTIONS or not actions.TASK_ID_RE.match(task):
+                return self._send(400, {"ok": False, "error": "bad_request",
+                                        "message": "unknown action or bad task id"})
+            meta = actions.ACTIONS[action]
+            return self._send(200, {"token": actions.issue_token(action, task),
+                                    "expires_in": actions.TOKEN_TTL_S, "action": action,
+                                    "task": task, "label": meta["label"], "why": meta["why"]})
         if path == "/api/appearance":
             return self._send(200, {})
         if path == "/api/cubicle/settings":
@@ -143,6 +177,72 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/appearance", "/api/cubicle/settings"):
             return self._send(200, {"ok": True})
         return self._send(404, '{"error":"not found"}')
+
+    def do_POST(self):
+        """The only write route. Every exit (including denials) logs one line to the actions log."""
+        path = urlparse(self.path).path
+        if path != "/api/office/action":
+            return self._send(404, '{"error":"not found"}')
+        rec = {"ts": int(time.time()), "actor": "dashboard"}
+
+        def answer(code, payload, retry=None):
+            actions.log_action(rec)
+            return self._send(code, payload, retry_after=retry)
+
+        if (self.headers.get("x-cubicle") or "").strip() != "1":
+            rec.update({"ok": False, "error": "x_cubicle_required"})
+            return answer(403, {"ok": False, "error": "x_cubicle_required",
+                                "message": "x-cubicle required"})
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 4096:
+            rec.update({"ok": False, "error": "too_large"})
+            return answer(413, {"ok": False, "error": "too_large", "message": "body exceeds 4096 bytes"})
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            rec.update({"ok": False, "error": "bad_json"})
+            return answer(400, {"ok": False, "error": "bad_json", "message": "body is not valid JSON"})
+        if not isinstance(body, dict):
+            body = {}
+        action, task, token = body.get("action"), body.get("task"), body.get("token")
+        agent = body.get("agent")
+        note = _clean_note(body.get("note"))
+        rec.update({"action": action, "task": task, "agent": agent})
+        # Order of checks is deliberate: cheap/local first, the DB write last.
+        if action not in actions.ACTIONS:
+            rec.update({"ok": False, "error": "unknown_action"})
+            return answer(400, {"ok": False, "error": "unknown_action",
+                                "message": f"unknown action: {action}"})
+        if not actions.TASK_ID_RE.match(task or ""):
+            rec.update({"ok": False, "error": "bad_task_id"})
+            return answer(400, {"ok": False, "error": "bad_task_id", "message": "bad task id"})
+        cap = actions.capability()
+        if not cap["writable"]:
+            rec.update({"ok": False, "error": "not_writable"})
+            return answer(503, {"ok": False, "error": "not_writable",
+                                "message": cap["reason"] or "writes disabled"})
+        allowed, retry = actions.check_rate(action, task)
+        if not allowed:
+            rec.update({"ok": False, "error": "rate_limited"})
+            return answer(429, {"ok": False, "error": "rate_limited", "message": "slow down"}, retry)
+        # Checked before the token is burned: a throttled retry can re-use the same confirm token,
+        # so the user just presses the button again instead of re-confirming.
+        ok, reason = actions.consume_token(action, task, token)
+        if not ok:
+            rec.update({"ok": False, "error": reason})
+            return answer(409, {"ok": False, "error": reason, "message": f"confirm token: {reason}"})
+        actions.record_hit(action, task)          # only a request that really writes is counted
+        try:
+            result = actions.perform(action, task, agent=agent, note=note)
+        except actions.ActionError as e:
+            rec.update({"ok": False, "error": e.code})
+            return answer(e.status, {"ok": False, "error": e.code, "message": e.message})
+        except Exception as e:                                   # never leak a traceback to the page
+            rec.update({"ok": False, "error": type(e).__name__})
+            return answer(500, {"ok": False, "error": "internal", "message": type(e).__name__})
+        rec.update({"ok": True, "before": result["before"], "after": result["after"],
+                    "run_id": result["run_id"]})
+        return answer(200, result)
 
 
 def main():

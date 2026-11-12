@@ -8,9 +8,14 @@
     python3 deploy/portainer.py logs [tail]     # last N lines of container logs
 
 The container runs python:3.14-slim (already on the host) with:
-  /app   <- /opt/data/coder-workspaces/busybee-office   (read-only; this repo)
-  /hermes<- busybee-hermes-data volume                 (read-only; kanban.db + creds)
+  /app       <- /opt/data/coder-workspaces/busybee-office   (read-only; this repo)
+  /hermes    <- busybee-hermes-data volume                 (read-only; kanban.db + creds)
+  /hermes-rw <- busybee-hermes-data volume (same dir)       (read-write; kanban.db writes, state)
   host port 9120 -> 9120, restart policy unless-stopped (survives reboots).
+
+The container runs as the hermes user (10000:10000): SQLite's `-wal`/`-shm` sidecar files for
+kanban.db live next to it, and if the container were root those sidecars would be created
+root-owned and the gateway (uid 10000) could no longer open the DB.
 
 Secrets stay in /hermes/creds on the read-only mount; the app serves no credential.
 """
@@ -75,20 +80,27 @@ def spec(tok):
         cfg = ins["Config"]
         host = ins["HostConfig"]
         old_env = [e for e in cfg.get("Env", []) if not e.startswith(("OFFICE_", "PYTHONUNBUFFERED="))]
-        old_mounts = [m for m in ins.get("Mounts", []) if m.get("Destination") not in ("/app", "/hermes")]
+        # Keep unrelated mounts, but rebuild /app, /hermes and /hermes-rw ourselves so the new
+        # bind survives a recreate exactly once (no duplicate /hermes-rw entries).
+        old_mounts = [m for m in ins.get("Mounts", []) if m.get("Destination") not in ("/app", "/hermes", "/hermes-rw")]
         return {
             "Image": cfg["Image"],
             "Env": old_env + [
                 "PYTHONUNBUFFERED=1", "OFFICE_PORT=9120", "OFFICE_DB=/hermes/kanban.db",
                 "OFFICE_HERMES_DIR=/hermes", "OFFICE_BUILD=busybee-office-1",
+                "OFFICE_DB_RW=/hermes-rw/kanban.db", "OFFICE_ALLOW_WRITES=1",
+                "OFFICE_STATE=/hermes-rw/state/busybee-office.json",
+                "OFFICE_ACTIONS_LOG=/hermes-rw/logs/office_actions.log",
             ],
             "Cmd": ["python3", "-m", "server.office"],
             "WorkingDir": "/app",
             "ExposedPorts": {"9120/tcp": {}},
             "HostConfig": {
+                "User": "10000:10000",          # run as hermes so SQLite WAL sidecars are uid 10000
                 "PortBindings": {"9120/tcp": [{"HostPort": "9120"}]},
                 "Binds": [
                     f"{HERMES_HOST}:/hermes:ro",
+                    f"{HERMES_HOST}:/hermes-rw:rw",
                     f"{APP_HOST}:/app:ro",
                 ] + [f"{m['Source']}:{m['Destination']}:{m['Mode']}" for m in old_mounts],
                 "NetworkMode": "agency-net",
@@ -102,13 +114,17 @@ def spec(tok):
     return {
         "Image": IMAGE,
         "Env": ["PYTHONUNBUFFERED=1", "OFFICE_PORT=9120", "OFFICE_DB=/hermes/kanban.db",
-                "OFFICE_HERMES_DIR=/hermes", "OFFICE_BUILD=busybee-office-1"],
+                "OFFICE_HERMES_DIR=/hermes", "OFFICE_BUILD=busybee-office-1",
+                "OFFICE_DB_RW=/hermes-rw/kanban.db", "OFFICE_ALLOW_WRITES=1",
+                "OFFICE_STATE=/hermes-rw/state/busybee-office.json",
+                "OFFICE_ACTIONS_LOG=/hermes-rw/logs/office_actions.log"],
         "Cmd": ["python3", "-m", "server.office"],
         "WorkingDir": "/app",
         "ExposedPorts": {"9120/tcp": {}},
         "HostConfig": {
+            "User": "10000:10000",              # run as hermes so SQLite WAL sidecars are uid 10000
             "PortBindings": {"9120/tcp": [{"HostPort": "9120"}]},
-            "Binds": [f"{HERMES_HOST}:/hermes:ro", f"{APP_HOST}:/app:ro"],
+            "Binds": [f"{HERMES_HOST}:/hermes:ro", f"{HERMES_HOST}:/hermes-rw:rw", f"{APP_HOST}:/app:ro"],
             "NetworkMode": "agency-net",
             "RestartPolicy": {"Name": "unless-stopped"},
             "LogConfig": {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},

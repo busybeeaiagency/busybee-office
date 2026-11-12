@@ -21,6 +21,10 @@ HERMES_DIR = os.environ.get("OFFICE_HERMES_DIR", "/hermes")
 CREDS_FILE = os.environ.get("OFFICE_CREDS", f"{HERMES_DIR}/creds/mattermost.json")
 BESZEL_CREDS = os.environ.get("OFFICE_BESZEL_CREDS", f"{HERMES_DIR}/creds/beszel.json")
 MM_BOT = os.environ.get("OFFICE_MM_BOT", "hermes")
+GATEWAY_ALIVE_S = int(os.environ.get("OFFICE_GATEWAY_ALIVE_S", "300"))   # agent.log younger than this == gateway up
+
+_gateway_cache = {"at": 0.0, "data": None}
+_gateway_lock = threading.Lock()
 
 PROBES = [
     ("Mattermost", f"{MM_BASE}/api/v4/system/ping", 4),
@@ -93,6 +97,47 @@ def _read_beszel_creds():
         except Exception:
             continue
     return None, None
+
+
+def gateway_alive(now=None):
+    """Is the main hermes session (the CEO) live? Cheapest signal first, cached 15 s like vitals().
+
+    Returns (alive, age_s, how). Never raises: (False, 0, "no signal") when there is no signal at all.
+      1. mtime of {HERMES_DIR}/logs/agent.log -> alive while it is younger than GATEWAY_ALIVE_S;
+      2. else the existing `Hermes UI` probe result (port 9119 reachable) -> alive with how="probe";
+      3. else False.
+    """
+    now = now or time.time()
+    with _gateway_lock:
+        if _gateway_cache["data"] is not None and now - _gateway_cache["at"] < 15:
+            return _gateway_cache["data"]
+    hermes_dir = os.environ.get("OFFICE_HERMES_DIR", HERMES_DIR)
+    age = None
+    try:
+        age = int(now - os.path.getmtime(os.path.join(hermes_dir, "logs", "agent.log")))
+        if age < GATEWAY_ALIVE_S:
+            res = (True, age, "log")
+            with _gateway_lock:
+                _gateway_cache.update({"at": time.time(), "data": res})
+            return res
+    except (OSError, ValueError):
+        age = None
+    for name, url, _port in PROBES:
+        if name == "Hermes UI" and url:
+            try:
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=3, context=ssl._create_unverified_context()) as r:
+                    if 200 <= r.status < 400:
+                        res = (True, age or 0, "probe")
+                        with _gateway_lock:
+                            _gateway_cache.update({"at": time.time(), "data": res})
+                        return res
+            except Exception:
+                pass
+    res = (False, age or 0, "no signal")
+    with _gateway_lock:
+        _gateway_cache.update({"at": now, "data": res})
+    return res
 
 
 class Sources:
@@ -321,3 +366,7 @@ class Sources:
         with self._lock:
             self._vitals = {"at": time.time(), "data": data}
         return data
+
+    def gateway_alive(self, now=None):
+        """The orchestrator's live-session signal, for the feed's chat-driven CEO desk (see module fn)."""
+        return gateway_alive(now)
