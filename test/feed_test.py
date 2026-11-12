@@ -289,10 +289,32 @@ class FeedTest(unittest.TestCase):
         self.add("t_ceo", "default", "blocked", title="Approve the deploy", started=self.now - 100, block="needs_input")
         aud = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now,
                                          gateway=(True, 12, "log")), "orchestrator")
-        self.assertEqual(aud["status"], "running")
+        # Bart's own desk holding a decision reads amber even while his session is live; the
+        # orchestrating line stays (no card id), and the banner still names the card.
+        self.assertEqual(aud["status"], "waiting")
         self.assertTrue(aud["task"]["title"].startswith("orchestrating"))
         self.assertNotIn("id", aud["task"])                     # not a claimed card
         self.assertEqual(aud["attention"]["task"]["id"], "t_ceo")  # banner stays, just not the line
+        self.assertTrue(aud["run"]["alive"])                    # the session liveness is still shown
+
+    def test_review_card_on_the_orchestrator_desk_counts_as_waiting(self):
+        # The scope add, in one assertion: a review-column card parked on default must be a
+        # decision (amber, in the counter), not green "orchestrating" over Bart's head.
+        self.add("t_ceo3", "default", "review", title="Ship the patch?", started=self.now - 500)
+        self.ev("t_ceo3", "review_requested", self.now - 480)
+        aud = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now,
+                                         gateway=(True, 5, "log")), "orchestrator")
+        self.assertEqual(aud["status"], "waiting")
+        self.assertEqual(aud["attention"]["task"]["kind"], "review")
+        self.assertEqual([a["kind"] for a in aud["attention"]["actions"]],
+                         ["approve", "reject", "restart"])
+        self.assertTrue(aud["run"]["alive"])                    # liveness never lost
+
+    def test_orchestrator_with_no_card_still_reads_working(self):
+        aud = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now,
+                                         gateway=(True, 5, "log")), "orchestrator")
+        self.assertEqual(aud["status"], "running")
+        self.assertTrue(aud["task"]["title"].startswith("orchestrating"))
 
     def test_orchestrator_without_gateway_falls_back(self):
         self.add("t_ceo2", "default", "blocked", title="Approve the deploy", started=self.now - 100, block="needs_input")

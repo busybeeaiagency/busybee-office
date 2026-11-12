@@ -421,12 +421,18 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
 
         # Orchestrator is chat-driven (spec 3): a live gateway session is "working" even with no card,
         # and it must not hijack the line for a lingering `default` card. Banner (attention) stays.
+        # A card waiting on Bart outranks session liveness: his own desk holding a review/blocked card
+        # must read as a decision (amber, counted in "waiting"), not as green "orchestrating" — that
+        # is the exact contradiction the phone photo caught. The gateway line still shows underneath.
         if agent.get("ceo") and status != "running" and gateway and gateway[0]:
             age = gateway[1] if len(gateway) > 1 else 0
-            how = gateway[2] if len(gateway) > 2 else "gateway"
-            status = "running"
-            task = {"title": "orchestrating — chat with Bart"}       # no id: not a claimed card
             run_field = {"alive": True, "heartbeatAgeS": max(0, int(age)), "how": "gateway"}
+            # The line stays "orchestrating" (never "working on <card>") either way; only the
+            # status follows the decision, so a card on his desk is counted as waiting.
+            if task is None or not task.get("id"):
+                task = {"title": "orchestrating — chat with Bart"}   # no id: not a claimed card
+            if not attention_cards:
+                status = "running"
 
         room = agent["home_room"]
         if status == "running" and task:
