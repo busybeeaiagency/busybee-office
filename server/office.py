@@ -98,7 +98,8 @@ class Handler(BaseHTTPRequestHandler):
         ext = os.path.splitext(full)[1].lower()
         with open(full, "rb") as f:
             body = f.read()
-        cache = "no-store" if ext in (".html", ".json") else "public, max-age=3600"
+        # A live dashboard: never let a browser keep an old theme or page for an hour.
+        cache = "public, max-age=3600" if ext in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".woff2") else "no-store"
         self._send(200, body, CONTENT_TYPES.get(ext, "application/octet-stream"), cache)
 
     def do_GET(self):
@@ -110,6 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sources": [{"kind": "feed", "label": "Hermes kanban", "path": "/api/feed/0"}],
                 "source": "feed", "label": "Hermes kanban", "redact": False,
                 "version": BUILD, "build": BUILD, "kpiLocal": False,
+                "theme": os.environ.get("OFFICE_THEME", "busybee"),
             })
         if path in ("/api/feed", "/api/feed/0"):
             data = current_feed()

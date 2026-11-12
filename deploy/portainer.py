@@ -61,7 +61,8 @@ def token():
 def find(tok):
     st, cts = call("GET", "/api/endpoints/3/docker/containers/json?all=true", token=tok)
     for ct in cts or []:
-        if NAME in (ct.get("Names") or []):
+        names = [n.lstrip("/") for n in (ct.get("Names") or [])]
+        if NAME in names:
             return ct["Id"], ct
     return None, None
 
@@ -139,9 +140,14 @@ def main():
             print("not deployed")
             return
         st, ins = call("GET", f"/api/endpoints/3/docker/containers/{cid}/json", token=tok)
+        ins = ins if isinstance(ins, dict) else {}
         state = ins["State"]
-        ports = [(p.get("PrivatePort"), p.get("PublicPort")) for p in (ins.get("NetworkSettings", {}).get("Ports", {}) or {}).get("9120/tcp", [])]
-        print(f"{NAME}: {state.get('Status')} health={state.get('Health', {}).get('Status')} ports={ports} restarts={state.get('RestartCount')}")
+        # Portainer's inspect proxy reports HostPort here; docker's own inspect uses PublicPort.
+        ports = sorted({p.get("PublicPort") or p.get("HostPort") for p in
+                        (ins.get("NetworkSettings", {}).get("Ports", {}) or {}).get("9120/tcp", [])})
+        print(f"{NAME}: {state.get('Status')} health={state.get('Health', {}).get('Status')} "
+              f"ports={ports} restarts={state.get('RestartCount')} "
+              f"restart_policy={ins['HostConfig'].get('RestartPolicy', {}).get('Name')}")
         return
     if cmd == "logs":
         tail = sys.argv[2] if len(sys.argv) > 2 else "40"

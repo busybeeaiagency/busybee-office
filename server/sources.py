@@ -53,6 +53,19 @@ def _get_json(url, timeout=6, token=None, data=None, headers=None):
     return json.loads(raw) if raw.strip() else None
 
 
+def _mm_login(user, password):
+    """Mattermost hands the session token back in the Token response header, not the body."""
+    req = urllib.request.Request(f"{MM_BASE}/api/v4/users/login",
+                                 data=json.dumps({"login_id": user, "password": password}).encode(),
+                                 method="POST")
+    req.add_header("Content-Type", "application/json")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+        return r.headers.get("Token")
+
+
 def _read_creds():
     """Mattermost bot credentials from the homelab credential store (never printed)."""
     user, password = os.environ.get("OFFICE_MM_USER"), os.environ.get("OFFICE_MM_PASSWORD")
@@ -61,7 +74,8 @@ def _read_creds():
     try:
         blob = json.load(open(CREDS_FILE))
         entry = (blob.get("users") or {}).get(MM_BOT) or {}
-        return entry.get("username"), entry.get("password")
+        # the store holds the login as "email"; older files used "username"
+        return entry.get("username") or entry.get("email"), entry.get("password")
     except Exception:
         return None, None
 
@@ -104,9 +118,8 @@ class Sources:
         if not user:
             return None
         try:
-            out = _get_json(f"{MM_BASE}/api/v4/users/login",
-                            data=json.dumps({"login_id": user, "password": password}).encode(), timeout=8)
-            self._mm_token, self._mm_token_at = out["token"], time.time()
+            token = _mm_login(user, password)
+            self._mm_token, self._mm_token_at = token, time.time()
         except Exception:
             self._mm_token = None
         return self._mm_token
@@ -119,8 +132,11 @@ class Sources:
             users = json.load(open(CREDS_FILE)).get("users") or {}
             ids = [u.get("user_id") for u in users.values() if u.get("user_id")]
             out = _get_json(f"{MM_BASE}/api/v4/users/status/ids",
-                            data=json.dumps({"user_ids": ids}).encode(), token=token, timeout=8)
-            return out, ""
+                            data=json.dumps(ids).encode(), token=token, timeout=8)
+            # the credentials file already maps username -> user_id, so no second lookup is needed
+            by_id = {str(u.get("user_id")): u.get("status", "offline") for u in (out or [])}
+            return {name: by_id.get(str(u.get("user_id")), "offline")
+                    for name, u in users.items() if u.get("user_id")}, ""
         except Exception as e:
             return {}, f"presence failed: {type(e).__name__}"
 
@@ -130,7 +146,7 @@ class Sources:
         if not todo:
             return
         try:
-            out = _get_json(f"{MM_BASE}/api/v4/users/ids", data=json.dumps({"user_ids": todo}).encode(),
+            out = _get_json(f"{MM_BASE}/api/v4/users/ids", data=json.dumps(todo).encode(),
                             token=token, timeout=8)
             for u in out or []:
                 self._user_names[u.get("id")] = u.get("username") or u.get("id")
@@ -157,15 +173,19 @@ class Sources:
                     self._offtopic_id = (out or {}).get("id")
             if not self._offtopic_id:
                 return {"presence": {}, "posts": [], "note": "off-topic channel not found"}
-            since = since_ms or int((time.time() - 3600) * 1000)
+            # The latest chatter, not "the last hour": an idle office has quiet hours.
+            since = since_ms or 0
             out = _get_json(f"{MM_BASE}/api/v4/channels/{self._offtopic_id}/posts?since={since}&per_page=30",
                             token=token, timeout=8)
             posts = []
             for pid in reversed(out.get("order") or []):
                 p = (out.get("posts") or {}).get(pid) or {}
-                if p.get("delete_at"):
+                if p.get("delete_at") or p.get("type"):      # skip joins/adds and other system posts
                     continue
-                posts.append({"user_id": p.get("user_id"), "message": (p.get("message") or "")[:200],
+                msg = (p.get("message") or "").strip()
+                if not msg or "joined the channel" in msg or "added to the channel" in msg:
+                    continue
+                posts.append({"user_id": p.get("user_id"), "message": msg[:200],
                               "at": p.get("create_at", 0)})
             ids = sorted({p["user_id"] for p in posts if p["user_id"]})
             self._resolve_users(ids)

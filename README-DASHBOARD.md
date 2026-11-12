@@ -22,7 +22,7 @@ gets a brief "✓ done" celebration. A small vitals panel shows homelab health.
 | `server/sources.py` | Mattermost, Beszel, Uptime Kuma, host stats, service probes (cached) |
 | `server/office.py` | the HTTP endpoints (map below) |
 | `public/themes/busybee.js` | the five-room mansion theme |
-| `public/index.html` | upstream client + guarded theme hooks (`theme.plan`, `theme.pickDesk`, …) |
+| `public/index.html` | upstream client + guarded theme hooks (`theme.plan`, `theme.pickDesk`, `theme.obstacles`, `cfg.theme`, …) |
 | `deploy/portainer.py` | create/recreate/stop/logs for the container on the docker host |
 | `test/feed_test.py` | `python3 -m unittest test.feed_test` |
 
@@ -70,6 +70,8 @@ python3 deploy/portainer.py logs 60     # container logs
 ```
 
 The container survives reboots via its restart policy; the app keeps no state of its own.
+Static assets are served `no-store` (only images cache for an hour), so a recreate is picked up
+by a plain reload; the theme in use is `OFFICE_THEME` (default `busybee`).
 
 Local development (no container):
 

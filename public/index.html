@@ -1152,7 +1152,7 @@
   let CW = BASE_CW, CH = 208;          // grows with the desks: a row down, or a wing to the left
   // A theme may replace the whole floor plan (see theme.plan below). ROOM_CW is the width the
   // room is drawn in (BASE_CW for a stock theme, wider/narrower for a custom plan).
-  let ROOM_CW = BASE_CW, ROOM_PLAN = '', LOUNGE_X = 15 * T;
+  let ROOM_CW = BASE_CW, ROOM_PLAN = '', LOUNGE_X = 15 * T, THEME_KEY = '';
   // A wide office has extra wings of desks on the left; the original room (desks, partition,
   // lounge) sits to their right, OX office pixels in. Themes draw that room as always, shifted.
   let OX = 0;
@@ -1195,7 +1195,11 @@
       if (!best || score < best.score - 0.02) best = { wings, rows, score };
     }
     const { wings, rows } = best;
-    if (!force && rows === ROWS && wings === WINGS) return;
+    // A theme may replace the whole floor plan (desks, canvas size, lounge). The stock geometry
+    // alone cannot tell us the plan is already applied, so also compare the active theme.
+    const planKey = (theme && theme.plan) ? (theme.id || 'custom') : '';
+    if (!force && rows === ROWS && wings === WINGS && planKey === THEME_KEY) return;
+    THEME_KEY = planKey;
     ROWS = rows; WINGS = wings; OX = (wings - 1) * WING;
     const at = (x, y, wing) => { const d = [x + (OX - wing * WING) / T, y]; d.base = [x, y]; return d; };
     const rowsY = [3, 7.5, 10.5]; for (let r = 1; r <= rows - 3; r++) rowsY.push(10.5 + 3.5 * r);
@@ -2232,7 +2236,8 @@
             title: a.role || a.title || '', createdAt: String(a.since ?? a.createdAt ?? i).padStart(20, '0'),
             status: STATUS_ALIASES[String(a.status || 'idle').toLowerCase()] || 'idle',
             errorReason: a.error || null, task, completedAt: a.completedAt || null,
-            parent: a.parent ? `${path}#${a.parent}` : null, recent: Array.isArray(a.recent) ? a.recent : null,
+            room: a.room || '', parent: a.parent ? `${path}#${a.parent}` : null,
+            recent: Array.isArray(a.recent) ? a.recent : null,
           };
         });
         return { agents, issues: [], label: p.label };
@@ -2308,6 +2313,9 @@
         redacted = !!cfg.redact; kpiLocal = !!cfg.kpiLocal;
         tgInfo = cfg.telegram || null;
         cfgVersion = cfg.version; whatsNew(cfg.version); showUpdate(cfg.update, cfg.version);
+        // The server can name the office's theme (busybee-office does); a URL param or a saved
+        // choice in this browser still wins.
+        if (cfg.theme && !params.get('theme') && !hasStoredTheme) settings.theme = cfg.theme;
         if (cfg.replay) replayClock = { ...cfg.replay, loadedAt: Date.now() };
         const list = cfg.sources || [cfg.source === 'feed'
           ? { kind: 'feed', label: cfg.label, path: '/api/feed' }
@@ -4190,6 +4198,7 @@
   const LANG_NAMES = { en: 'English', tr: 'Türkçe', de: 'Deutsch', es: 'Español', fr: 'Français', zh: '中文', ar: 'العربية' };
   const STORE = 'cubicle.settings';
   let settings = { theme: 'pixel' };
+  const hasStoredTheme = (() => { try { return !!JSON.parse(localStorage.getItem(STORE) || '{}').theme; } catch (_) { return false; } })();
   try { settings = { ...settings, ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch (_) {}
   // URL parameters win, so a kiosk link always opens the same way.
   if (params.get('theme')) settings.theme = params.get('theme');

@@ -193,6 +193,14 @@
     "options": []
   },
   {
+    "id": "busybee",
+    "name": {
+      "en": "BUSY BEE mansion",
+      "tr": "BUSY BEE konağı"
+    },
+    "options": []
+  },
+  {
     "id": "factory",
     "name": {
       "en": "Factory (HD)",
