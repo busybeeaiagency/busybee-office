@@ -530,7 +530,10 @@
       runSecond: 's', runMinute: 'min', runHour: 'h',
       prevAttempts: (n) => `previous attempts (${n})`, prevSteps: (n) => `${n} steps`,
       // the three kanban writes, the confirmation that gates them, and what each answer means
-      actRestart: 'Restart', actApprove: 'Approve', actDismiss: 'Dismiss',
+      actRestart: 'Restart', actApprove: 'Approve', actDismiss: 'Dismiss', actReject: 'Reject',
+      // the review column is Bart's own queue: the banner says whose turn it is, in his words
+      awaitingDecision: 'awaiting YOUR decision', reviewTitle: (n) => `${n}: awaiting YOUR decision`,
+      actWaiting: (d) => `waiting ${d}`,
       actTitle: 'Confirm this', actOk: 'OK', actNote: 'One line for the card (optional)',
       actSince: (d) => `blocked ${d}`, actSlow: (n) => `slow down — retry in ${n}s`,
       lastSteps: 'Last steps', whatsNew: (v) => `Cubicle was updated to ${v}.`, whatsNewLink: "What's new", reloadNote: 'Cubicle was updated.', reloadBtn: 'Reload the page', upNew: (v, cur) => `⬆ Cubicle ${v} is out (you have ${cur}).`, upHow: 'To update:', upCopy: 'Copy', upCopied: 'Copied', upAuto: 'It updates itself in a moment; this page then reloads.', upAutoHint: 'Start Cubicle with --auto-update and it updates itself.', upNow: 'Update now', upBusy: 'Updating…', upDone: 'Updated; reloading.', upErr: 'It could not update from here. Run this instead:', upFail: 'Could not update from here (it needs an instance admin). Run this where Paperclip runs:',
@@ -652,7 +655,10 @@
       runAttempt: (at, n) => `deneme ${at}/${n}`,
       runSecond: 'sn', runMinute: 'dk', runHour: 'sa',
       prevAttempts: (n) => `önceki denemeler (${n})`, prevSteps: (n) => `${n} adım`,
-      actRestart: 'Yeniden başlat', actApprove: 'Onayla', actDismiss: 'Yoksay',
+      actRestart: 'Yeniden başlat', actApprove: 'Onayla', actDismiss: 'Yoksay', actReject: 'Reddet',
+      // inceleme süturu Bart'ın kendi sırası: afiş kimin beklediğini onun sözleriyle söyler
+      awaitingDecision: 'SENİN kararını bekliyor', reviewTitle: (n) => `${n}: SENİN kararını bekliyor`,
+      actWaiting: (d) => `bekliyor, ${d}`,
       actTitle: 'Bu işlemi onayla', actOk: 'Tamam', actNote: 'Kart için tek satır (isteğe bağlı)',
       actSince: (d) => `${d} önce engellendi`, actSlow: (n) => `yavaşla — ${n} sn sonra tekrar dene`,
       lastSteps: 'Son adımlar', whatsNew: (v) => `Cubicle ${v} sürümüne güncellendi.`, whatsNewLink: 'Yenilikler', reloadNote: 'Cubicle güncellendi.', reloadBtn: 'Sayfayı yenile', upNew: (v, cur) => `⬆ Cubicle ${v} çıktı (sizdeki ${cur}).`, upHow: 'Güncellemek için:', upCopy: 'Kopyala', upCopied: 'Kopyalandı', upAuto: 'Birazdan kendiliğinden güncellenecek; sayfa da yenilenir.', upAutoHint: 'Cubicle’ı --auto-update ile başlatırsanız kendiliğinden güncellenir.', upNow: 'Şimdi güncelle', upBusy: 'Güncelleniyor…', upDone: 'Güncellendi; sayfa yenileniyor.', upErr: 'Buradan güncellenemedi. Bunun yerine şunu çalıştırın:', upFail: 'Buradan güncellenemedi (yönetici yetkisi gerekir). Paperclip’in çalıştığı yerde şunu çalıştırın:',
@@ -3320,8 +3326,9 @@
   // waits for a decision, dismiss the crashed run behind a badge. None of them is sent on a click:
   // the button first asks the server what it *would* do, shows that sentence, and only an explicit
   // OK writes. A cancelled dialog sends nothing at all, and a refused POST is never retried.
-  const ACT_KEY = { restart: 'actRestart', approve: 'actApprove', dismiss: 'actDismiss' };
-  const BLOCK_KIND = { crashed: 'error', needs_input: 'waiting' };   // the kind, in the pill's own words
+  const ACT_KEY = { restart: 'actRestart', approve: 'actApprove', dismiss: 'actDismiss', reject: 'actReject' };
+  // the kind, in the pill's own words; `review` is Bart's decision column, not an error
+  const BLOCK_KIND = { crashed: 'error', needs_input: 'waiting', review: 'awaitingDecision' };
   const actLabel = (x) => (ACT_KEY[x.kind] && (L[ACT_KEY[x.kind]] || EN[ACT_KEY[x.kind]])) || x.label || x.kind;
 
   // The buttons themselves. They always carry the card id: a button that cannot name the card it
@@ -3444,7 +3451,9 @@
     const f = s.lastFail, a = s.attention, t = a && a.task;
     if (!t && !((s.status === 'error' || s.status === 'waiting') && s.error) && !f) return '';
     const crashed = !!t && t.kind === 'crashed';
-    const head = t ? (crashed ? L.error : (L.needsYouTitle || EN.needsYouTitle)(s.name))
+    const review = !!t && t.kind === 'review';
+    const head = t ? (crashed ? L.error : review ? (L.reviewTitle || EN.reviewTitle)(s.name)
+      : (L.needsYouTitle || EN.needsYouTitle)(s.name))
       : s.status === 'waiting' ? (L.needsYouTitle || EN.needsYouTitle)(s.name) : f ? L.lastFail(ago(f.at)) : L.error;
     const msg = s.error && (t || s.status === 'error' || s.status === 'waiting') ? s.error : (f && f.error) || '';
     const stale = Array.isArray(s.stale) && s.stale.length
@@ -3452,7 +3461,7 @@
     return `<div class="errbox${t && !crashed ? ' warn' : ''}"><b>⚠ ${esc(head)}${t ? ` · <code>${esc(t.id)}</code>` : ''}</b>`
       + `${msg ? `<div>${esc(msg)}</div>` : ''}`
       + (t && t.title ? `<div class="errtitle" title="${esc(t.title)}">${esc(t.title)}</div>` : '')
-      + (t ? `<div class="errnote">${esc(L[BLOCK_KIND[t.kind]] || BLOCK_KIND[t.kind] || t.kind)}${Number.isFinite(t.since) ? ` · ${esc((L.actSince || EN.actSince)(agoLong(t.since)))}` : ''}</div>` : '')
+      + (t ? `<div class="errnote">${esc(L[BLOCK_KIND[t.kind]] || BLOCK_KIND[t.kind] || t.kind)}${Number.isFinite(t.since) ? ` · ${esc((review ? (L.actWaiting || EN.actWaiting) : (L.actSince || EN.actSince))(agoLong(t.since)))}` : ''}</div>` : '')
       + stale
       + `${f && f.code ? `<code>${esc(f.code)}</code>` : ''}${f && f.stderr ? `<pre>${esc(f.stderr)}</pre>` : ''}`
       + officeActsHtml(s) + `</div>`;
@@ -5132,13 +5141,13 @@
   var TR = /^tr/i.test(document.documentElement.lang || '');
   var NAMES = { running: TR ? 'çalışıyor' : 'working', waiting: TR ? 'karar bekliyor' : 'needs a decision', error: TR ? 'hata' : 'error', idle: TR ? 'boşta' : 'idle', paused: TR ? 'duraklatıldı' : 'paused' };
   var W = TR ? { agents: 'Ajanlar', refresh: 'Yenile', close: 'Kapat', agent: 'Ajan', role: 'Rol', status: 'Durum', task: 'Üzerinde çalıştığı iş', last: 'Son işlem', time: 'Süre',
-      blockedOn: 'Engellendiği kart', subs: function (n) { return n + ' alt ajan ayrı sayılır'; },
+      blockedOn: 'Engellendiği kart', awaitingYou: 'SENİN kararını bekliyor', crashedRun: 'çökmüş çalıştırma', subs: function (n) { return n + ' alt ajan ayrı sayılır'; },
       countTitle: 'N = çalışıyor + karar bekleyen + hatalı + boşta + duraklatılmış · çalışıyor = şu anda üstlenilmiş bir kart, karar bekleyen = sizin kararınızı bekleyen kart, hatalı = çökmüş bir çalıştırma',
       // the same words the pills use, so the headline can be read against the rows
       sum: function (n, c, subs) { return n + ' ajan · ' + (c.running || 0) + ' ' + NAMES.running + ' · ' + (c.waiting || 0) + ' ' + NAMES.waiting + ' · ' + (c.error || 0) + ' ' + NAMES.error + ' · ' + (c.idle || 0) + ' ' + NAMES.idle + ' · ' + (c.paused || 0) + ' ' + NAMES.paused + (subs ? ' · ' + subs + ' alt ajan' : ''); },
       ceo: 'Son CEO görevleri', s: 'sn', m: 'dk', h: 'sa', d: 'g' }
     : { agents: 'Agents', refresh: 'Refresh', close: 'Close', agent: 'Agent', role: 'Role', status: 'Status', task: 'Working on', last: 'Last step', time: 'For',
-      blockedOn: 'Blocked on', subs: function (n) { return n + ' subagent' + (n === 1 ? '' : 's') + ' counted separately'; },
+      blockedOn: 'Blocked on', awaitingYou: 'awaiting YOUR decision', crashedRun: 'crashed run', subs: function (n) { return n + ' subagent' + (n === 1 ? '' : 's') + ' counted separately'; },
       countTitle: 'N = working + waiting + error + idle + paused · working = a task claimed right now, waiting = a card that needs your decision, error = a crashed run',
       sum: function (n, c, subs) { return n + ' agents · ' + (c.running || 0) + ' ' + NAMES.running + ' · ' + (c.waiting || 0) + ' ' + NAMES.waiting + ' · ' + (c.error || 0) + ' ' + NAMES.error + ' · ' + (c.idle || 0) + ' ' + NAMES.idle + ' · ' + (c.paused || 0) + ' ' + NAMES.paused + (subs ? ' · ' + subs + ' subagents' : ''); },
       ceo: 'Latest CEO tasks', s: 's', m: 'min', h: 'h', d: 'd' };
@@ -5150,7 +5159,13 @@
   function taskText(a) { var t = a.task; if (!t) return ''; if (typeof t === 'string') return t; return (t.id ? t.id + ' · ' : '') + (t.title || ''); }
   // The card behind a waiting/error badge, always named by its id: the office and this table must
   // never point at two different cards for the same agent.
-  function blockText(a) { var t = a.attention && a.attention.task; if (!t) return ''; return W.blockedOn + ': ' + (t.id || '') + (t.title ? ' · ' + t.title : ''); }
+  function blockText(a) {
+    var t = a.attention && a.attention.task; if (!t) return '';
+    // the review column is a decision, not a stall; a crash is not a decision. Say which it is.
+    var lead = t.kind === 'review' ? (W.awaitingYou || 'awaiting YOUR decision')
+      : t.kind === 'crashed' ? (W.crashedRun || 'crashed run') : (W.blockedOn || 'Blocked on');
+    return lead + ': ' + (t.id || '') + (t.title ? ' · ' + t.title : '');
+  }
   // "▼ N more below": on a phone the dialog's body is the only scroller, and a row cut in half at
   // the bottom edge does not look like there is anything under it.
   function moreBelow() {
