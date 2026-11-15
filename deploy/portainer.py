@@ -9,8 +9,10 @@
 
 The container runs python:3.14-slim (already on the host) with:
   /app       <- /opt/data/coder-workspaces/busybee-office   (read-only; this repo)
-  /hermes    <- busybee-hermes-data volume                 (read-only; kanban.db + creds)
-  /hermes-rw <- busybee-hermes-data volume (same dir)       (read-write; kanban.db writes, state)
+  /hermes    <- busybee-hermes-data volume                 (read-only; kanban.db + creds + the shared
+               scripts/approval_queue.py, the one funnel for Bart's decision queue)
+  /hermes-rw <- busybee-hermes-data volume (same dir)       (read-write; kanban.db writes, state, and
+               runtime/approvals — pending.json + the decisions overlay, which the container writes)
   host port 9120 -> 9120, restart policy unless-stopped (survives reboots).
 
 The container runs as the hermes user (10000:10000): SQLite's `-wal`/`-shm` sidecar files for
@@ -79,7 +81,10 @@ def spec(tok):
         st, ins = call("GET", f"/api/endpoints/3/docker/containers/{cid}/json", token=tok)
         cfg = ins["Config"]
         host = ins["HostConfig"]
-        old_env = [e for e in cfg.get("Env", []) if not e.startswith(("OFFICE_", "PYTHONUNBUFFERED="))]
+        # APPROVAL_* is part of the filter for the same reason OFFICE_* is: these are ours, so the
+        # rebuild below must replace them instead of carrying the old copy and adding a duplicate.
+        old_env = [e for e in cfg.get("Env", [])
+                   if not e.startswith(("OFFICE_", "APPROVAL_", "PYTHONUNBUFFERED="))]
         # Keep unrelated mounts, but rebuild /app, /hermes and /hermes-rw ourselves so the new
         # bind survives a recreate exactly once (no duplicate /hermes-rw entries).
         old_mounts = [m for m in ins.get("Mounts", []) if m.get("Destination") not in ("/app", "/hermes", "/hermes-rw")]
@@ -91,6 +96,11 @@ def spec(tok):
                 "OFFICE_DB_RW=/hermes-rw/kanban.db", "OFFICE_ALLOW_WRITES=1",
                 "OFFICE_STATE=/hermes-rw/state/busybee-office.json",
                 "OFFICE_ACTIONS_LOG=/hermes-rw/logs/office_actions.log",
+                # The shared decision queue: the canonical module is read from the read-only mount,
+                # its state (pending.json, the overlay, the gate marker) is written on the RW one.
+                "APPROVAL_STATE_DIR=/hermes-rw/runtime/approvals",
+                "APPROVAL_KANBAN_DB=/hermes-rw/kanban.db",
+                "OFFICE_APPROVAL_MODULE=/hermes/scripts/approval_queue.py",
             ],
             "Cmd": ["python3", "-m", "server.office"],
             "WorkingDir": "/app",
@@ -117,7 +127,11 @@ def spec(tok):
                 "OFFICE_HERMES_DIR=/hermes", "OFFICE_BUILD=busybee-office-1",
                 "OFFICE_DB_RW=/hermes-rw/kanban.db", "OFFICE_ALLOW_WRITES=1",
                 "OFFICE_STATE=/hermes-rw/state/busybee-office.json",
-                "OFFICE_ACTIONS_LOG=/hermes-rw/logs/office_actions.log"],
+                "OFFICE_ACTIONS_LOG=/hermes-rw/logs/office_actions.log",
+                # same three as the live-container branch above, so `create` and `recreate` agree
+                "APPROVAL_STATE_DIR=/hermes-rw/runtime/approvals",
+                "APPROVAL_KANBAN_DB=/hermes-rw/kanban.db",
+                "OFFICE_APPROVAL_MODULE=/hermes/scripts/approval_queue.py"],
         "Cmd": ["python3", "-m", "server.office"],
         "WorkingDir": "/app",
         "ExposedPorts": {"9120/tcp": {}},

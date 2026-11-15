@@ -7,6 +7,7 @@ rewrites the OFFICE_* env in setUp. No network, no live /opt/data/kanban.db.
 """
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -28,10 +29,17 @@ class ActionsTest(unittest.TestCase):
         os.close(fd)
         self.state = tempfile.mktemp(suffix=".json")
         self.log = tempfile.mktemp(suffix=".log")
+        self.noqueue = tempfile.mkdtemp(prefix="aq-absent-")   # a dir with no queue module in it
         os.environ["OFFICE_DB_RW"] = self.db
         os.environ["OFFICE_ALLOW_WRITES"] = "1"
         os.environ["OFFICE_STATE"] = self.state
         os.environ["OFFICE_ACTIONS_LOG"] = self.log
+        # The shared approval queue stays out of these tests: an explicitly configured
+        # OFFICE_APPROVAL_MODULE is authoritative (server/approval_queue.py), so pointing it at a
+        # file that is not there keeps these writes from touching the real
+        # /opt/data/runtime/approvals once that module lands. The queue itself is covered by
+        # test/approval_queue_test.py against a fixture.
+        os.environ["OFFICE_APPROVAL_MODULE"] = os.path.join(self.noqueue, "approval_queue.py")
         self.now = 1_800_000_000
         self.con = sqlite3.connect(self.db)
         self.con.executescript(SCHEMA)
@@ -44,7 +52,9 @@ class ActionsTest(unittest.TestCase):
                 os.unlink(p)
             except OSError:
                 pass
-        for k in ("OFFICE_DB_RW", "OFFICE_ALLOW_WRITES", "OFFICE_STATE", "OFFICE_ACTIONS_LOG"):
+        shutil.rmtree(self.noqueue, ignore_errors=True)
+        for k in ("OFFICE_DB_RW", "OFFICE_ALLOW_WRITES", "OFFICE_STATE", "OFFICE_ACTIONS_LOG",
+                  "OFFICE_APPROVAL_MODULE"):
             os.environ.pop(k, None)
 
     # ---------- helpers ----------

@@ -18,6 +18,13 @@ resting in `review` (the normal state of that column) has none — reject handle
 the handoff provenance and parent gating, and records `note: no review_requested provenance` when
 the card entered review without one instead of guessing an implementer.
 
+A decision made here is ALSO published to the shared approval queue (`server/approval_queue.py` ->
+the canonical `/hermes/scripts/approval_queue.py`), which is what clears the `#coding` review-gate
+button and the matching `pending.json` entry so the same card does not keep asking Bart for the same
+answer from three surfaces. That publish runs after the commit, outside the transaction, and can
+never fail the request: the card moving is the thing the operator clicked for, and the gate cron
+reconciles the queue if the publish does not happen.
+
 Every write runs in ONE `BEGIN IMMEDIATE` transaction with `busy_timeout=5000`, an `isolation_level`
 of None (we own the transaction), and a `WHERE` guard on the status we expect — so a write is
 re-run-safe and returns 409 (`not_in_expected_state`) when someone else already moved the card,
@@ -31,7 +38,7 @@ import re
 import sqlite3
 import time
 
-from . import state
+from . import approval_queue, state
 
 # The operator actions and how the UI labels/explains each one. The review column gets
 # approve/reject/restart (the same decisions the #coding review-gate buttons offer); a blocked
@@ -48,6 +55,16 @@ ACTIONS = {
 }
 
 TASK_ID_RE = re.compile(r"^t_[0-9a-f]{6,}$", re.IGNORECASE)
+
+# The actions that ANSWER a pending request: the same three decisions the #coding review gate posts
+# buttons for. `dismiss` is deliberately absent — acknowledging a crashed run is not a verdict on the
+# card, and publishing it would retire a request Bart has not actually answered.
+DECISION_ACTIONS = ("approve", "reject", "restart")
+DECISION_DEFAULT_DETAIL = {
+    "approve": "Approved from the BUSY BEE office dashboard",
+    "reject": "Rejected from the BUSY BEE office dashboard",
+    "restart": "Restarted from the BUSY BEE office dashboard",
+}
 
 TOKEN_TTL_S = 120
 PER_TASK_S = 10              # at most one write to a given card every 10 s
@@ -491,6 +508,39 @@ def _do_dismiss(con, task, row, now):
             "detail": f"dismissed run {run_id}" if run_id is not None else "dismissed (no open run)"}
 
 
+def _pruned_any(res):
+    """`prune()` answers with a dict (`{"removed": <entry|None>}`) while `decide()` may hand back a
+    plain bool — normalise both to "did a pending request actually die", which is what the UI shows."""
+    pruned = res.get("pruned")
+    if isinstance(pruned, dict):
+        return bool(pruned.get("removed"))
+    return bool(pruned)
+
+
+def publish_decision(action, task, note=None, actor="dashboard"):
+    """Publish an answered request to the shared approval queue: overlay row + pending entry gone +
+    review-gate marker gone, so the other surfaces stop asking about a card that is already decided.
+
+    Never raises. A missing/broken module is reported in the payload and the gate's own cron sweep
+    reconciles the leftovers, so the operator's click is never blocked by the queue being dark.
+    """
+    module = approval_queue.queue()
+    if module is None:
+        return {"ok": False, "pruned": False, "marker": False, "error": "approval_queue unavailable"}
+    detail = (note or "").strip() or DECISION_DEFAULT_DETAIL.get(action, action)
+    try:
+        # `actor` here is the route's surface label ("dashboard"); the overlay wants the human, and
+        # the human behind this dashboard is Bart (same actor the MM buttons record).
+        who = actor if actor and actor != "dashboard" else "bart"
+        res = module.decide(task, action, actor=who, surface="dashboard",
+                            detail=detail, channel="coding") or {}
+    except Exception as e:                                # noqa: BLE001 - a dark queue never fails a click
+        return {"ok": False, "pruned": False, "marker": False,
+                "error": f"{type(e).__name__}: {e}"}
+    return {"ok": bool(res.get("ok")), "pruned": _pruned_any(res), "marker": bool(res.get("marker")),
+            "error": res.get("error") or None}
+
+
 def perform(action, task, *, agent=None, note=None, actor="dashboard"):
     """Do one action against a card. Returns {ok, action, task, before, after, run_id, detail}."""
     if action not in ACTIONS:
@@ -530,9 +580,15 @@ def perform(action, task, *, agent=None, note=None, actor="dashboard"):
     if action == "dismiss":
         state.record_dismissed(task, {"at": int(time.time()), "block_ts": result["block_ts"],
                                       "run_id": result["run_id"]})
-    return {"ok": True, "action": action, "task": task, "agent": agent, "actor": actor,
-            "before": result["before"], "after": result["after"], "run_id": result["run_id"],
-            "detail": result["detail"]}
+    payload = {"ok": True, "action": action, "task": task, "agent": agent, "actor": actor,
+               "before": result["before"], "after": result["after"], "run_id": result["run_id"],
+               "detail": result["detail"]}
+    if action in DECISION_ACTIONS:
+        # After the commit, on purpose: the card moving is what the operator clicked for, the queue
+        # note is bookkeeping. The payload carries the outcome so the UI can say "queue cleared"
+        # instead of guessing, and so a dark queue is visible rather than silent.
+        payload["approval_queue"] = publish_decision(action, task, note, actor)
+    return payload
 
 
 def log_action(record):
