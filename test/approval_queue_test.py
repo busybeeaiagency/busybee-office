@@ -414,5 +414,45 @@ class RealModuleIntegrationTest(QueueHarness):
         self.assertEqual(self.task_row(tid)["status"], "done")
 
 
+class QueueStatusTest(QueueHarness):
+    """The status endpoints must tell an empty queue apart from an unreachable one."""
+
+    def setUp(self):
+        self.make_harness(STUB)
+        self.q = queue_loader.queue()
+        if self.q is None:
+            self.skipTest("test/approval_queue_stub.py did not load through server/approval_queue.py")
+
+    def tearDown(self):
+        self.drop_harness()
+
+    def _pending_file(self):
+        return os.path.join(self.state_dir, "pending.json")
+
+    def test_open_requests_are_counted_with_their_cards(self):
+        self.q.register("t_c0ffee31", "Approve the PR?", "coding", "review_decision",
+                        surface="review-gate")
+        self.q.register("t_c0ffee32", "Reject the deploy?", "coding", "review_decision",
+                        surface="review-gate")
+        self.assertEqual(actions.queue_status(),
+                         {"open": 2, "ids": ["t_c0ffee31", "t_c0ffee32"]})
+
+    def test_an_empty_queue_is_zero_not_none(self):
+        with open(self._pending_file(), "w") as f:
+            f.write("{}\n")
+        self.assertEqual(actions.queue_status(), {"open": 0, "ids": []})
+
+    def test_a_queue_that_cannot_be_loaded_is_none(self):
+        """No module loaded => None: the UI says 'not wired', never 'nothing to decide'."""
+        os.environ["OFFICE_APPROVAL_MODULE"] = os.path.join(self.state_dir, "absent.py")
+        self.assertIsNone(actions.queue_status())
+
+    def test_a_pending_file_that_is_not_json_is_none(self):
+        """A torn write is a fault to report, not a queue that happens to be empty."""
+        with open(self._pending_file(), "w") as f:
+            f.write('{"t_c0ffee33": {"label": "trunc')
+        self.assertIsNone(actions.queue_status())
+
+
 if __name__ == "__main__":
     unittest.main()

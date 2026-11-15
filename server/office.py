@@ -142,9 +142,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "db": os.path.exists(DB_PATH),
                                     "agents": len(current_feed()["agents"]),
                                     "writable": cap["writable"],
-                                    "actions": actions.performed_count()})
+                                    "actions": actions.performed_count(),
+                                    # open approval requests, or null when the queue is not wired here
+                                    "queue": actions.queue_status()})
         if path == "/api/office/actions":
-            return self._send(200, actions.capability())
+            return self._send(200, dict(actions.capability(),
+                                        queue=actions.queue_status()))
         if path == "/api/office/confirm":
             if (self.headers.get("x-cubicle") or "").strip() != "1":
                 return self._send(403, {"error": "x-cubicle required"})

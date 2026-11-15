@@ -112,6 +112,37 @@ def capability():
     return {"writable": True, "reason": None, "actions": sorted(ACTIONS)}
 
 
+def queue_status():
+    """The dashboard's view of the decision queue, for the status endpoints: how many requests are
+    still waiting for Bart, and on which cards.
+
+    `None` means the queue could not be read — no module, or a `pending.json` that does not parse —
+    and the UI must render that as "queue not wired" rather than as "nothing to decide". An empty
+    queue and an unreadable one otherwise look identical, and only one of them means Bart's approvals
+    are being recorded. `load_pending()` deliberately swallows a torn write and returns `{}`, so the
+    file is parsed here too when the module publishes its path.
+    """
+    aq = approval_queue.queue()
+    if aq is None:
+        return None
+    try:
+        where = getattr(aq, "pending_path", None)
+        if callable(where):
+            location = where()
+            if isinstance(location, (str, bytes, int)):
+                try:
+                    with open(location) as handle:
+                        json.load(handle)
+                except FileNotFoundError:
+                    pass        # nothing has ever been queued: that is empty, not broken
+        pending = aq.load_pending()
+    except (OSError, ValueError):
+        return None
+    if not isinstance(pending, dict):
+        return None
+    return {"open": len(pending), "ids": sorted(pending)}
+
+
 def issue_token(action, task, now=None):
     """Hand the page a one-shot token for exactly (action, task); TTL 120 s."""
     now = now or time.time()
