@@ -2441,6 +2441,10 @@
         // The server can name the office's theme (busybee-office does); a URL param or a saved
         // choice in this browser still wins.
         if (cfg.theme && !params.get('theme') && !hasStoredTheme) settings.theme = cfg.theme;
+        // Publish the deployment's own choice as well: applySettings resolves the office through
+        // this, so a settings chain that painted before /config.json answered cannot be left
+        // showing the wrong office. A ?theme= URL param clears it, so the param still wins.
+        window.__cubicleServerTheme = params.get('theme') ? '' : (cfg.theme || '');
         // A config that arrives after the theme chain's 1200 ms cap has already painted the wrong
         // office: re-apply the decision (applySettings re-sizes the canvas, which re-fits the stage).
         // A saved browser choice or a ?theme= param was never overridden above, so it still wins.
@@ -2496,10 +2500,14 @@
   async function fetchOfficeCaps() {
     try {
       const r = await fetch('/api/office/actions', { cache: 'no-store' });
-      if (!r.ok) return { writable: false, reason: null, actions: [] };
+      if (!r.ok) return { writable: false, reason: null, actions: [], dispatch: null };
       const j = await r.json();
-      return { writable: !!j.writable, reason: j.reason || null, actions: Array.isArray(j.actions) ? j.actions : [] };
-    } catch (_) { return officeCaps || { writable: false, reason: null, actions: [] }; }
+      // `dispatch` travels with the caps: the Check queue button is painted only when the office
+      // backend says it can reach the dispatcher, and a stock Cubicle (no such route) stays dark.
+      return { writable: !!j.writable, reason: j.reason || null,
+               actions: Array.isArray(j.actions) ? j.actions : [],
+               dispatch: (j.dispatch && typeof j.dispatch === 'object') ? j.dispatch : null };
+    } catch (_) { return officeCaps || { writable: false, reason: null, actions: [], dispatch: null }; }
   }
 
   // The outcome of an operator action, shown in the header line. poll() keeps it in front for a few
@@ -3337,6 +3345,9 @@
   }
   const KB_MARK = { running: '🟢', blocked: '🔴', review: '🟡', ready: '🔵', todo: '⬜', done: '✅' };
   const KB_ORDER = ['running', 'blocked', 'review', 'ready', 'todo', 'done'];
+  // the feed re-renders the cards every cycle, so an opened kanban list must be remembered here —
+  // the same trick the step/attempt lists use (openSteps), or the drawer would snap shut on its own
+  const kbOpen = new Set();
   function kanbanBlock(s, panel) {
     // a card renderer must never break the frame loop, so anything odd here renders as nothing
     try {
@@ -3353,7 +3364,7 @@
         const more = Number(c[k]) > 6 ? `<div class="kbr" style="color:var(--muted)">${esc((L.kanbanMore || EN.kanbanMore)(Number(c[k]) - 6))}</div>` : '';
         return `<div class="kbg">${KB_MARK[k]} ${esc(k)} · ${esc(c[k])}</div>${rows}${more}`;
       }).join('');
-      return `<details class="kb"${panel ? ' open' : ''}><summary title="${esc(L.kanbanTitle || EN.kanbanTitle)}">${head || esc(L.kanbanNone || EN.kanbanNone)}</summary>${body}</details>`;
+      return `<details class="kb" data-kb="${esc(s.id)}"${(panel || kbOpen.has(s.id)) ? ' open' : ''}><summary title="${esc(L.kanbanTitle || EN.kanbanTitle)}">${head || esc(L.kanbanNone || EN.kanbanNone)}</summary>${body}</details>`;
     } catch (_) { return ''; }
   }
 
@@ -3376,7 +3387,15 @@
     return ans + `<details class="steps" data-id="${esc(s.id)}"${openSteps.has(s.id) ? ' open' : ''}><summary>${esc(L.lastSteps)} (${s.recent.length})</summary><ol>${items}</ol></details>`;
   }
   cardsEl.addEventListener('toggle', (e) => {
-    const d = e.target; if (!d.dataset || !d.dataset.id) return;
+    const d = e.target;
+    // The kanban list keeps its own open state: the cards are rebuilt every feed cycle, and it
+    // shares the card markup with the step lists without owning openSteps.
+    if (d.classList && d.classList.contains('kb')) {
+      const k = d.dataset && d.dataset.kb;
+      if (k) { if (d.open) kbOpen.add(k); else kbOpen.delete(k); }
+      return;
+    }
+    if (!d.dataset || !d.dataset.id) return;
     // Only the step/attempt lists own openSteps. A card can grow another <details> (the kanban
     // counts carry the same agent id in the same markup) and must not impersonate them.
     if (!d.classList.contains('steps') && !d.classList.contains('prev')) return;
@@ -4676,6 +4695,11 @@
   }
 
   async function applySettings() {
+    // A wall office names its own theme. That outranks the page's own default and any theme the
+    // page auto-saved here earlier — measured at 4 of 5 loads the old code painted the stock pixel
+    // office because the chain resolved settings.theme before /config.json had answered. A ?theme=
+    // URL param cleared __cubicleServerTheme in the boot leg, so an explicit link still wins.
+    if (window.__cubicleServerTheme) settings.theme = window.__cubicleServerTheme;
     const entry = CATALOG.find((c) => c.id === settings.theme) || CATALOG[0];
     themeOpts = {};
     for (const o of entry.options) themeOpts[o.key] = o.values.some((v) => v[0] === settings[o.key]) ? settings[o.key] : o.values[0][0];

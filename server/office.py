@@ -22,6 +22,7 @@ credentials are read server-side from /hermes/creds and stay in this process.
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -48,6 +49,39 @@ CONTENT_TYPES = {
 _lock = threading.Lock()
 _feed = {"at": 0.0, "data": None, "error": ""}
 sources_api = sources.Sources()
+
+
+def office_theme():
+    """The office this deployment draws — the same answer /config.json gives, sanitised for HTML."""
+    return re.sub(r"[^a-z0-9-]", "", os.environ.get("OFFICE_THEME", "busybee")) or "pixel"
+
+
+def stamp_server_theme(body, theme):
+    """Carry that decision INSIDE the page, ahead of its first script.
+
+    A browser that has to ASK which office this is can paint the wrong one first: measured at 4 of
+    5 loads the theme chain resolved before /config.json answered, and the wall showed the stock
+    pixel office instead of the mansion (aspect 1.69 against 3.15 — which is what made the wrong
+    render look cropped with its labels and ticker off-frame). One line before </head> ends the
+    race: there is nothing left to wait for and nothing to re-paint.
+    """
+    # Our own marker, not the word: the page references window.__cubicleServerTheme in its own
+    # client code, and guarding on the bare word would skip the stamp forever.
+    if b"data-office-theme" in body:
+        return body
+    script = ('<script data-office-theme="1">window.__cubicleServerTheme=%s;</script>'
+              % json.dumps(theme)).encode()
+    # Insert after <head>, not before </head>: this page is one 520 KB file that embeds HTML in its
+    # own template strings, and a literal "</head>" inside a JS string would land our line deep in
+    # the body — after the app script had already chosen the office. After <head> it is simply first.
+    i = body.find(b"<head>")
+    if i >= 0:
+        i += len(b"<head>")
+        return body[:i] + script + body[i:]
+    i = body.find(b"<script")                      # no <head> at all: still precede the app script
+    if i >= 0:
+        return body[:i] + script + body[i:]
+    return script + body
 
 
 def current_feed():
@@ -116,6 +150,8 @@ class Handler(BaseHTTPRequestHandler):
         ext = os.path.splitext(full)[1].lower()
         with open(full, "rb") as f:
             body = f.read()
+        if ext == ".html":
+            body = stamp_server_theme(body, office_theme())
         # A live dashboard: never let a browser keep an old theme or page for an hour.
         cache = "public, max-age=3600" if ext in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".woff2") else "no-store"
         self._send(200, body, CONTENT_TYPES.get(ext, "application/octet-stream"), cache)
@@ -129,7 +165,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sources": [{"kind": "feed", "label": "Hermes kanban", "path": "/api/feed/0"}],
                 "source": "feed", "label": "Hermes kanban", "redact": False,
                 "version": BUILD, "build": BUILD, "kpiLocal": False,
-                "theme": os.environ.get("OFFICE_THEME", "busybee"),
+                "theme": office_theme(),
             })
         if path in ("/api/feed", "/api/feed/0"):
             data = current_feed()
