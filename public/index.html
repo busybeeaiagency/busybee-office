@@ -4705,7 +4705,14 @@
     for (const o of entry.options) themeOpts[o.key] = o.values.some((v) => v[0] === settings[o.key]) ? settings[o.key] : o.values[0][0];
     theme = await loadTheme(entry.id);
     if (theme.setup) theme.setup(themeOpts);
-    resizeCanvas();
+    // The floor plan belongs to the theme, so applying a theme means re-running the layout: a theme
+    // that replaces the plan (busybee's five-room panorama, CW 656 against the stock 352) also sets
+    // the canvas size, and layoutFor ends in resizeCanvas. Calling resizeCanvas here instead left
+    // whatever CW/CH the stock layout had picked: measured, when the feed answered before this chain
+    // the office was drawn in the stock 352x208 canvas — the right theme, the wrong geometry, which
+    // is the ~2x-cropped render with the labels clipped and the ticker off-frame — and it stayed that
+    // way until a window resize (the resize handler is the only other caller of layoutFor).
+    layoutFor(AGENTS || 0, true);
     // The office's own theme decision can land after this chain has already painted once; the boot
     // leg compares theme.id against its decision and re-runs this through the published handle.
     window.__cubicleApplySettings = applySettings;

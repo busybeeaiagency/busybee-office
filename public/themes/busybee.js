@@ -7,12 +7,18 @@
 
   // ---- floor plan (tiles; the page multiplies by T) ----------------------------------------
   const ROOM_W = 7;                       // tiles per room
+  // The desk row sits at 5.0 tiles, not the 3.5 it used to be: an agent's task+name chips hang
+  // ~1.2 tiles over its head, and at 3.5 those chips landed on the wall plaque line (office y
+  // 18..31) and grazed the room name on every load — the "labels clipped / misaligned" complaint.
+  // One tile down puts the chips at y ~47..60, clear of the wall, and leaves the room furniture
+  // (shelf, arcade, rack: y 41..86) behind the desks, which is what it is drawn to look like.
+  const DESK_Y = 5.0;
   const ROOMS = [
-    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[0.5, 3.5], [4.4, 3.5]] },
-    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[7.5, 3.5], [11.4, 3.5]] },
-    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[14.5, 3.5], [18.4, 3.5]] },
-    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[21.5, 3.5], [25.4, 3.5]] },
-    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[28.5, 3.5], [32.4, 3.5]] },
+    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[0.5, DESK_Y], [4.4, DESK_Y]] },
+    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[7.5, DESK_Y], [11.4, DESK_Y]] },
+    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[14.5, DESK_Y], [18.4, DESK_Y]] },
+    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[21.5, DESK_Y], [25.4, DESK_Y]] },
+    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[28.5, DESK_Y], [32.4, DESK_Y]] },
   ];
   const LOUNGE_X = 35;                    // tiles; x where the lounge starts
   const CW_TILES = 41;                    // 5 rooms + lounge
@@ -99,22 +105,32 @@
     K.wall(c, { top: '#242a35', bottom: '#1a1f29', trim: 'rgba(0,0,0,.45)', band: 'rgba(255,255,255,.05)' });
 
     // windows on the wall (two, over the work area)
-    K.window(c, 1.5 * T, 4, 2.6 * T, 24, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 3));
-    K.window(c, 36.4 * T, 4, 2.6 * T, 24, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 11));
+    // The wall strip is y 0..WALL_TOP (32); everything an agent or its name chip occupies starts at
+    // y 34 (measured: the two stacked chips over a desk at 3.5 tiles land at office y 34..48, exactly
+    // where the plaques used to sit, so the room names were half covered on every load). So the wall
+    // is stacked top-down with a unit of clearance each: windows 2..18, the company sign at 10
+    // (centred between the windows, never over a plaque), room plaques 18..31, and nothing of ours
+    // below that until the desks. The chips scale with the canvas, so clearing them at fit clears
+    // them at every zoom.
+    K.window(c, 1.5 * T, 2, 2.6 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 3));
+    K.window(c, 36.4 * T, 2, 2.6 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 11));
 
-    // company name on the wall, centred over the whole floor
-    K.sign(c, CW / 2, 15, { color: '#d8b25a', size: 6 });
+    // company name on the wall, centred over the whole floor — between the two windows, above the
+    // plaque line (y 10 with ~6-unit glyphs stays inside 2..17; the plaques start at 18)
+    K.sign(c, CW / 2, 10, { color: '#d8b25a', size: 6 });
 
-    // room plaques on the back wall of each room, above its desks
+    // room plaques on the back wall of each room: the wall strip ends at WALL_TOP (32) and the
+    // agents' name/task chips begin at y 34, so 18..31 is the only band the room name can live in
+    // and still be readable on every load — measured, the old y 35..48 sat exactly under the chips.
     for (const r of ROOMS) {
       const x0 = ROOMS.indexOf(r) * ROOM_W * T;
-      K.rr('#12151c', x0 + 10, 35, ROOM_W * T - 20, 13, 1.5);
-      K.rect(r.accent, x0 + 10, 35, 2, 13);
-      K.text(K.say(c, { en: r.en, tr: r.tr }), x0 + ROOM_W * T / 2 + 1, 42.8, { size: 6, align: 'center', color: '#e8ecf4' });
+      K.rr('#12151c', x0 + 10, 18, ROOM_W * T - 20, 13, 1.5);
+      K.rect(r.accent, x0 + 10, 18, 2, 13);
+      K.text(K.say(c, { en: r.en, tr: r.tr }), x0 + ROOM_W * T / 2 + 1, 25.8, { size: 6, align: 'center', color: '#e8ecf4' });
     }
-    K.rr('#12151c', LOUNGE_X * T + 4, 35, CW - (LOUNGE_X * T) - 10, 13, 1.5);
-    K.rect('#f59e0b', LOUNGE_X * T + 4, 35, 2, 13);
-    K.text(K.say(c, { en: 'Lounge', tr: 'Dinlenme' }), LOUNGE_X * T + (CW - LOUNGE_X * T) / 2 + 1, 42.8, { size: 6, align: 'center', color: '#e8ecf4' });
+    K.rr('#12151c', LOUNGE_X * T + 4, 18, CW - (LOUNGE_X * T) - 10, 13, 1.5);
+    K.rect('#f59e0b', LOUNGE_X * T + 4, 18, 2, 13);
+    K.text(K.say(c, { en: 'Lounge', tr: 'Dinlenme' }), LOUNGE_X * T + (CW - LOUNGE_X * T) / 2 + 1, 25.8, { size: 6, align: 'center', color: '#e8ecf4' });
 
     drawWalls(c);
 
@@ -161,7 +177,10 @@
     K.plant((LOUNGE_X + 0.4) * T, 9.8 * T, { size: 1.3 });
     K.plant(CW - 0.6 * T, 9.8 * T, { size: 1.3 });
     K.clock(c, CW - 22, 4, { color: '#ff6b4a' });
-    K.statusBoard(c, 150, 4, 16, 22, { frame: '#1b1f24', bg: '#05090c' });
+    // The wall status board used to hang at y 4 with h 22, i.e. down to y 26 — right on top of the
+    // room plaque under it, which is why "Game Dev" read as "…e Dev". Shrunk to stay above the
+    // plaque line (plaques start at y 18); the four status bars still fit in the shorter frame.
+    K.statusBoard(c, 150, 1.5, 16, 14, { frame: '#1b1f24', bg: '#05090c' });
   }
 
   function props(c, list) {
