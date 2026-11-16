@@ -8,22 +8,23 @@
   // ---- floor plan (tiles; the page multiplies by T) ----------------------------------------
   // Rooms are 12.5 tiles so a room's two name chips can never touch: the chips are DOM boxes
   // measured at 40.6 css px half-width (11 px cap) / 29.5 px (8 px floor) at scale k = clientWidth/CW.
-  // Desk offsets are room-LOCAL (plan() adds the room's own x): at 1.8 and 7.9 tiles the seated
-  // sprite (desk_x*T + 22) keeps its worst-case 46 px chip half inside the canvas edge (50.8 >= 48)
-  // and inside its own room (194.4 <= 200), and the two chips sit 97.6 px apart (> 93.4 needed).
-  // DESK_Y 5.6: the measured seated chip stack (worst 2-line task bubble + name, 8 px floor font
-  // at the smallest fit scale) reaches 66 px above the sprite anchor, putting its top at
-  // 5.6*T + 12 - 66 = 35.6 — below the plaque band's floor at 34 (see theme_geometry_test).
+  // Desk offsets are room-LOCAL (plan() adds the room's own x). At 2.6 tiles the seated sprite sits
+  // at 2.6*T + 22 = 63.6, so the worst-case task bubble (80 px cap = 125 px-office units at the
+  // smallest fit scale k ~ 0.63) still clears the canvas edge by ~1 unit; at 8.1 the name-chip
+  // right (151.6 + 51) stays inside the room's label lane and 10+ units clear of the next room's
+  // desk chip. The 88-unit desk gap fits two typical 8 px name chips (2 x ~39 units); two patho-
+  // logically long names at once is the known remainder, and overlapping task BUBBLES are
+  // suppressed by placeLabels by design.
   const ROOM_W = 12.5;                    // tiles per room
   const DESK_Y = 5.6;
   // The desk pair is written room-LOCAL (identical for all five rooms); plan() shifts it by the
   // room's own x, since the kit paints a desk at its absolute tile x (d[0] * T).
   const ROOMS = [
-    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
-    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
-    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
-    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
-    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
+    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
+    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
+    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
+    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
+    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
   ];
   const LOUNGE_X = 5 * ROOM_W;            // tiles; x where the lounge starts (62.5)
   const CW_TILES = 5 * ROOM_W + 9;        // 5 rooms + lounge (71.5)

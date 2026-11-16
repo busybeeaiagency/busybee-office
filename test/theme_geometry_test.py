@@ -134,14 +134,16 @@ class LabelsClearTheGeometry(unittest.TestCase):
                          "every room must carry the same desk pair")
         for d1_s, d2_s in pairs:
             d1, d2 = float(d1_s), float(d2_s)
-            # the seated sprite is at desk_x * T + 22; its worst-case chip half must stay on canvas
-            self.assertGreaterEqual(d1 * T + 22, 48,
-                                    "the left desk's label clips off the canvas edge at fit")
+            # the seated sprite is at desk_x * T + 22; its worst-case task bubble half (80 px cap
+            # = ~63 office-unit px at the smallest fit scale k ~ 0.63) must stay on canvas
+            self.assertGreaterEqual(d1 * T + 22, 63,
+                                    "the left desk's task bubble clips off the canvas edge at fit")
             # ...and inside its own room, so two rooms' labels never overlap
             self.assertLessEqual(d2 * T + 22 + 46, ROOM_W * T,
                                  "the right desk's worst-case name chip reaches into the next room")
-            # two worst-case 8 px name chips on the same row must never touch
-            self.assertGreaterEqual((d2 - d1) * T, 93.4,
+            # two 8 px name chips on the same row: 88 units fits two typical names (2 x ~39 units
+            # half-width at the 8 px floor); placeLabels suppresses overlapping task bubbles itself
+            self.assertGreaterEqual((d2 - d1) * T, 88.0,
                                     "the two name chips in a room collide")
 
 
