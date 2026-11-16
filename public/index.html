@@ -378,6 +378,18 @@
     #detail.sheet { max-height: 58vh; }
     #detail.sheet .erracts { position: sticky; bottom: 0; }   /* the buttons stay reachable while the card scrolls */
   }
+  /* the result of an action the user asked for must not hide in the header count line */
+  #toast { position: fixed; right: 14px; bottom: 74px; z-index: 60; max-width: min(430px, 90vw);
+    background: #151827; border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px;
+    padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: #e8eaf2; cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); display: none; }
+  #toast.show { display: block; }
+  #toast.ok { border-left-color: #4caf7d; }
+  #toast.warn { border-left-color: #d8a13a; }
+  #toast.err { border-left-color: #e0574f; }
+  #toast b { display: block; font-size: 13px; margin-bottom: 3px; }
+  #toast .d { color: #9ab3c7; word-break: break-word; }
+  @media (max-width: 700px) { #toast { left: 12px; right: 12px; bottom: 66px; max-width: none; } }
 </style>
 </head>
 <body>
@@ -413,6 +425,7 @@
   <dialog id="ghdlg"></dialog>
   <dialog id="qdlg"></dialog>
   <dialog id="answer"><div class="head"><b></b><a target="_blank" rel="noopener"></a><button type="button" class="x"></button></div><iframe title="Paperclip"></iframe><div class="note"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
   <footer>
     <span id="hint"></span>
     <span><a href="https://github.com/caglarutkuguler/cubicle" target="_blank" rel="noopener">Cubicle</a> · MIT</span>
@@ -542,6 +555,7 @@
       kanbanNone: 'no tasks on the board', kanbanMore: (n) => `+${n} more`,
       dispatchQueue: 'Check queue', dispatchTitle: 'Run one dispatcher pass now so idle agents pick up ready tasks',
       dispatchBusy: 'checking…', dispatchFail: 'the office backend could not reach the dispatcher',
+      dispatchDone: 'Dispatcher pass', dispatchDeferred: 'deferred',
       // the review column is Bart's own queue: the banner says whose turn it is, in his words
       awaitingDecision: 'awaiting YOUR decision', reviewTitle: (n) => `${n}: awaiting YOUR decision`,
       actWaiting: (d) => `waiting ${d}`,
@@ -672,6 +686,7 @@
       kanbanNone: 'panoda görev yok', kanbanMore: (n) => `+${n} fazla`,
       dispatchQueue: 'Kuyruğu kontrol et', dispatchTitle: 'Boştaki ajanlar hazır görevleri alsın diye şimdi tek bir yönetici turu çalıştır',
       dispatchBusy: 'kontrol ediliyor…', dispatchFail: 'ofis arkaucu yöneticiye ulaşamadı',
+      dispatchDone: 'Yönetici turu', dispatchDeferred: 'ertelendi',
       // inceleme süturu Bart'ın kendi sırası: afiş kimin beklediğini onun sözleriyle söyler
       awaitingDecision: 'SENİN kararını bekliyor', reviewTitle: (n) => `${n}: SENİN kararını bekliyor`,
       actWaiting: (d) => `bekliyor, ${d}`,
@@ -786,6 +801,13 @@
       lookServer: 'Auf dem Rechner gespeichert, auf dem Cubicle läuft, damit jeder Bildschirm dieses Büros es zeigt.', lookLocal: 'In diesem Browser gespeichert. Exportieren, um es in einem anderen zu nutzen.',
       lookDenied: 'Nur ein Browser auf dem Rechner, auf dem Cubicle läuft, kann das Aussehen ändern. Vorerst in diesem Browser gespeichert.',
       needsYouTitle: (n) => `${n} braucht dich`,
+      // das eigene Kanban eines Agenten (nur gelesen, nie geschrieben) und der Dispatcher-Durchlauf
+      kanbanTitle: 'Karten auf dem Kanban dieses Agenten', kanbanLoading: 'Kanban: lädt…',
+      kanbanNone: 'keine Aufgaben auf dem Board', kanbanMore: (n) => `+${n} mehr`,
+      dispatchQueue: 'Warteschlange prüfen',
+      dispatchTitle: 'Jetzt einen Dispatcher-Durchlauf starten, damit freie Agenten bereite Aufgaben übernehmen',
+      dispatchBusy: 'prüfe…', dispatchFail: 'Das Büro-Backend hat den Dispatcher nicht erreicht',
+      dispatchDone: 'Dispatcher-Durchlauf', dispatchDeferred: 'zurückgestellt',
       // Die Büro-Operator-Aktionen (spec 2): die Knöpfe im Banner, die addierenden Zähler, die
       // Zeile zum laufenden Versuch. Jeder Lesefall fällt auf Englisch zurück, damit nie undefined steht.
       summaryMore: (k, e) => `${k} warten · ${e} mit Fehler`,
@@ -912,6 +934,13 @@
       lookServer: 'Guardado en el equipo donde corre Cubicle, así cada pantalla de esta oficina lo muestra.', lookLocal: 'Guardado en este navegador. Expórtalo para usarlo en otro.',
       lookDenied: 'Solo un navegador en el equipo donde corre Cubicle puede cambiar la apariencia. Guardado en este navegador por ahora.',
       needsYouTitle: (n) => `${n} te necesita`,
+      // el kanban de este agente (solo lectura, nunca escritura) y la pasada del dispatcher
+      kanbanTitle: 'Tarjetas en el kanban de este agente', kanbanLoading: 'kanban: cargando…',
+      kanbanNone: 'no hay tareas en el tablero', kanbanMore: (n) => `+${n} más`,
+      dispatchQueue: 'Comprobar la cola',
+      dispatchTitle: 'Ejecuta ahora una pasada del dispatcher para que los agentes libres tomen las tareas listas',
+      dispatchBusy: 'comprobando…', dispatchFail: 'el backend de la oficina no pudo contactar con el dispatcher',
+      dispatchDone: 'Pasada del dispatcher', dispatchDeferred: 'aplazada',
       // Las acciones del operador de la oficina (spec 2): los botones del cartel, los contadores que suman,
       // la línea del intento en curso. Cada lectura cae en el inglés, así que nunca aparece un undefined.
       summaryMore: (k, e) => `${k} en espera · ${e} en error`,
@@ -1038,6 +1067,13 @@
       lookServer: 'Enregistré sur la machine où tourne Cubicle : chaque écran de ce bureau l’affiche.', lookLocal: 'Enregistré dans ce navigateur. Exportez-le pour l’utiliser ailleurs.',
       lookDenied: 'Seul un navigateur sur la machine où tourne Cubicle peut changer l’apparence. Enregistré dans ce navigateur pour l’instant.',
       needsYouTitle: (n) => `${n} a besoin de vous`,
+      // le kanban de cet agent (lecture seule, jamais d’écriture) et la passe du dispatcher
+      kanbanTitle: 'Les cartes du kanban de cet agent', kanbanLoading: 'kanban : chargement…',
+      kanbanNone: 'aucune tâche sur le tableau', kanbanMore: (n) => `+${n} en plus`,
+      dispatchQueue: 'Vérifier la file',
+      dispatchTitle: 'Lancer maintenant une passe du dispatcher pour que les agents libres prennent les tâches prêtes',
+      dispatchBusy: 'vérification…', dispatchFail: 'le backend du bureau n’a pas pu joindre le dispatcher',
+      dispatchDone: 'Passe du dispatcher', dispatchDeferred: 'reportée',
       // Les actions de l’opérateur du bureau (spec 2) : les boutons de la bannière, les compteurs qui
       // additionnent, la ligne de la tentative en cours. Chaque lecture retombe sur l’anglais, jamais un undefined.
       summaryMore: (k, e) => `${k} en attente · ${e} en erreur`,
@@ -1164,6 +1200,13 @@
       lookServer: '保存在运行 Cubicle 的电脑上，这个办公室的每块屏幕都会显示。', lookLocal: '保存在此浏览器中。导出后可在其他浏览器使用。',
       lookDenied: '只有运行 Cubicle 的电脑上的浏览器才能更改外观。暂时保存在此浏览器中。',
       needsYouTitle: (n) => `${n} 需要你`,
+      // 该代理自己的看板（只读，绝不写入）与一次调度轮
+      kanbanTitle: '该代理在看板上的卡片', kanbanLoading: '看板：加载中…',
+      kanbanNone: '看板上没有任务', kanbanMore: (n) => `+${n} 更多`,
+      dispatchQueue: '检查队列',
+      dispatchTitle: '立即运行一次调度轮，让空闲代理领取就绪任务',
+      dispatchBusy: '检查中…', dispatchFail: '办公后端无法连接调度器',
+      dispatchDone: '调度轮结果', dispatchDeferred: '已延后',
       // 办公室操作员动作（spec 2）：横幅上的按钮、加总的计数、当前尝试的那一行。
       // 每次读取都回退到英文，所以绝不会显示 undefined。
       summaryMore: (k, e) => `${k} 等待中 · ${e} 出错`,
@@ -1290,6 +1333,13 @@
       lookServer: 'يُحفظ على الجهاز الذي يشغّل Cubicle، فتعرضه كل شاشات هذا المكتب.', lookLocal: 'يُحفظ في هذا المتصفح. صدّره لاستخدامه في متصفح آخر.',
       lookDenied: 'لا يغيّر المظهر إلا متصفح على الجهاز الذي يشغّل Cubicle. حُفظ في هذا المتصفح مؤقتًا.',
       needsYouTitle: (n) => `${n} يحتاجك`,
+      // لوح هذا الوكيل الخاص (قراءة فقط، لا كتابة) وجولة المُوزِّع
+      kanbanTitle: 'بطاقات هذا الوكيل على اللوح', kanbanLoading: 'اللوح: جارٍ التحميل…',
+      kanbanNone: 'لا مهام على اللوح', kanbanMore: (n) => `+${n} أخرى`,
+      dispatchQueue: 'افحص الطابور',
+      dispatchTitle: 'شغّل جولة واحدة للمُوزِّع الآن ليبدأ الوكلاء المتفرغون المهام الجاهزة',
+      dispatchBusy: 'جارٍ الفحص…', dispatchFail: 'لم يستطع خادم المكتب الوصول إلى المُوزِّع',
+      dispatchDone: 'جولة المُوزِّع', dispatchDeferred: 'مُرجَّأة',
       // إجراءات مشغّل المكتب (spec 2): أزرار اللافتة، والعدّادات التي تجمع، وسطر المحاولة الجارية.
       // كل قراءة ترجع إلى الإنجليزية، فلا يظهر undefined أبدًا.
       summaryMore: (k, e) => `${k} في الانتظار · ${e} خطأ`,
@@ -2600,6 +2650,21 @@
   let statusNote = '', statusNoteUntil = 0;
   function setStatusNote(text, secs = 8) { statusNote = String(text); statusNoteUntil = Date.now() + secs * 1000; statusEl.textContent = statusNote; }
 
+  // …and the same outcome as a card in the corner, because on the TV layout the header line is 13 px
+  // muted text wrapped under the title: pressing 📥 three times looked like nothing happened. The
+  // counter line is a status; an answer to something the operator just asked for needs its own box.
+  const toastEl = document.getElementById('toast');
+  let toastTimer = 0;
+  function showToast(kind, title, lines) {
+    if (!toastEl) return;
+    clearTimeout(toastTimer);                                        // a new answer replaces the last one
+    toastEl.className = `show ${kind}`;                              // show + ok | warn | err
+    toastEl.innerHTML = `<b>${esc(title)}</b>` +
+      (Array.isArray(lines) ? lines : [lines]).filter((s) => s).map((s) => `<div class="d">${esc(s)}</div>`).join('');
+    toastTimer = setTimeout(() => { toastEl.className = ''; }, kind === 'ok' ? 14000 : 20000);
+  }
+  if (toastEl) toastEl.addEventListener('click', () => { clearTimeout(toastTimer); toastEl.className = ''; });
+
   // "Check queue": one dispatcher pass, the same door the Hermes dashboard uses. The office never
   // claims a card itself — it asks the dashboard for a single pass so idle agents pick up ready
   // work. Nothing secret travels here: the dashboard password stays server-side, only a bare {} goes.
@@ -2607,13 +2672,42 @@
     if (!btn || btn.disabled) return;                      // one nudge at a time
     const was = btn.textContent;
     btn.disabled = true; btn.textContent = `📥 ${L.dispatchBusy || EN.dispatchBusy}`;
+    // The backend already names the reason (memory pressure, host cap, per-profile cap) in `message`;
+    // the deferred cards go underneath it, id first, so an operator can open the card it is about.
+    const deferredLine = (r) => {
+      const n = Number(r && r.deferred_n) || 0;
+      if (n <= 0) return '';
+      const list = (Array.isArray(r.deferred) ? r.deferred : [])
+        .map((x) => (Array.isArray(x) ? [x[0], x[1]] : [x, ''])).filter((x) => x[0])
+        .slice(0, 4).map((x) => `${x[0]} (${x[1]})`.replace(/\s*\(\s*\)$/, ''));
+      return `${(L.dispatchDeferred || EN.dispatchDeferred)}: ${list.join(', ') || n}`;
+    };
     try {
-      const r = await (await fetch('/api/office/dispatch', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: '{}' })).json();
+      const resp = await fetch('/api/office/dispatch', { method: 'POST', cache: 'no-store',
+        headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: '{}' });
+      let r = null;
+      try { r = await resp.json(); } catch (_) { r = null; }   // a proxy or a stock Cubicle answers HTML
+      const ids = (Array.isArray(r && r.spawned) ? r.spawned : []).map((x) => (x && x.task) || '').filter(Boolean);
+      const dl = deferredLine(r);
       if (r && r.ok) {
-        const ids = (Array.isArray(r.spawned) ? r.spawned : []).slice(0, 3).map((x) => (x && x.task) || '').filter(Boolean);
-        setStatusNote(`📥 ${r.message || ''}${(r.spawned_n && ids.length) ? ` — ${ids.join(', ')}` : ''}`, 15);
-      } else setStatusNote(`⚠ ${(r && (r.message || r.error)) || (L.dispatchFail || EN.dispatchFail)}`);
-    } catch (_) { setStatusNote(`⚠ ${L.dispatchFail || EN.dispatchFail}`); }
+        setStatusNote(`📥 ${r.message || ''}${(r.spawned_n && ids.slice(0, 3).length) ? ` — ${ids.slice(0, 3).join(', ')}` : ''}`, 15);
+        showToast('ok', `📥 ${L.dispatchDone || EN.dispatchDone}`,
+          [r.message || '', ...(r.spawned_n ? [ids.slice(0, 4).join(', ')] : []), dl].filter((s) => s && String(s).trim()));
+      } else {
+        const status = Number(resp.status) || 0;
+        const code = String((r && (r.error || r.code)) || '');
+        // "not yet" (429 rate-limited, a locked queue, the dashboard briefly away) is a warning;
+        // anything else we cannot name — a missing x-cubicle header, an error page where JSON
+        // should be — is an error. server/office.py + server/dispatch.py are the code list.
+        const kind = (status === 429 || status === 502 || status === 503 || /defer|lock|throttl|slow|unavail|offline|rate_limited|creds|not_writable/i.test(code)) ? 'warn' : 'err';
+        const line = (r && (r.message || r.error)) || (L.dispatchFail || EN.dispatchFail);
+        setStatusNote(`⚠ ${line}`);
+        showToast(kind, `⚠ ${L.dispatchDone || EN.dispatchDone}`, [line, dl]);
+      }
+    } catch (_) {
+      setStatusNote(`⚠ ${L.dispatchFail || EN.dispatchFail}`);
+      showToast('err', `⚠ ${L.dispatchDone || EN.dispatchDone}`, [L.dispatchFail || EN.dispatchFail]);
+    }
     finally {
       btn.disabled = false; btn.textContent = was;
       renderNav();                                          // rebuild the nav from the caps, as always
