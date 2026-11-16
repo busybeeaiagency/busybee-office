@@ -19,6 +19,7 @@ source that caused them:
 
 Run:  python3 -m unittest test.theme_geometry_test -v
 """
+import math
 import os
 import re
 import unittest
@@ -124,7 +125,7 @@ class LabelsClearTheGeometry(unittest.TestCase):
 
     def test_chips_top_out_below_the_plaque_band(self):
         desk_y = float(re.search(r"const DESK_Y = ([\d.]+);", THEME).group(1))
-        self.assertGreater(desk_y * T + 12 - 60, 31,
+        self.assertGreater(desk_y * T + 12 - 66, 34,
                            "a seated agent's stacked chips reach into the plaque band (y 18..31)")
 
     def test_desk_pair_clears_the_edge_the_room_and_each_other(self):
@@ -142,6 +143,37 @@ class LabelsClearTheGeometry(unittest.TestCase):
             # two worst-case 8 px name chips on the same row must never touch
             self.assertGreaterEqual((d2 - d1) * T, 93.4,
                                     "the two name chips in a room collide")
+
+
+    def test_idle_loiter_spots_clear_every_chip_box(self):
+        """Idle agents loiter at the LOUNGE spots; their own name + one zZ line stack ~40 px above
+        the feet and a worst-case name half is 52 px wide. No spot may stand under a desk's stacked
+        chips, share a band with another loiter spot closer than two worst-case names, sink into the
+        overlay panels (y 170), or clip the canvas edge."""
+        m = re.search(r"const loiter = \[(.*?)\];", THEME, re.S)
+        self.assertIsNotNone(m, "the loiter spot table vanished from plan()")
+        spots = [(float(a), float(b)) for a, b in re.findall(r"\[([\d.]+), ([\d.]+)\]", m.group(1))]
+        self.assertGreaterEqual(len(spots), 6, "one loiter spot per agent slot")
+        desk_y = float(re.search(r"const DESK_Y = ([\d.]+);", THEME).group(1))
+        offs = [float(v) for v in re.search(r"desks: \[\[(\d+(?:\.\d+)?), DESK_Y\], \[(\d+(?:\.\d+)?), DESK_Y\]\]", THEME).groups()]
+        desk_sits = [(i * ROOM_W + off) * T + 22 for i in range(5) for off in offs]
+        cw = math.ceil((5 * ROOM_W + 9) * T)
+        for x, y in spots:
+            feet, top, half = y * T, y * T - 40.0, 52.0
+            self.assertLessEqual(feet, 169.5, f"loiter spot {x},{y} sinks its name into the panel band")
+            self.assertGreaterEqual(x * T - half, 0, f"loiter spot {x},{y} clips the left canvas edge")
+            self.assertLessEqual(x * T + half, cw, f"loiter spot {x},{y} clips the right canvas edge")
+            for dx in desk_sits:
+                if abs(x * T - dx) < 100.0:
+                    self.assertGreaterEqual(top, desk_y * T + 12 + 4,
+                                            f"loiter spot {x},{y} stands under a seated agent's chips")
+            for ox, oy in spots:
+                if (ox, oy) == (x, y):
+                    continue
+                bands_overlap = abs(y - oy) * T < 40.0
+                if bands_overlap:
+                    self.assertGreaterEqual(abs(x - ox) * T, 88.0,
+                                            f"loiter spots {x},{y} and {ox},{oy} share a chip row too closely")
 
 
 if __name__ == "__main__":

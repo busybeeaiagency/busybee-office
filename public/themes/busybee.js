@@ -11,10 +11,11 @@
   // Desk offsets are room-LOCAL (plan() adds the room's own x): at 1.8 and 7.9 tiles the seated
   // sprite (desk_x*T + 22) keeps its worst-case 46 px chip half inside the canvas edge (50.8 >= 48)
   // and inside its own room (194.4 <= 200), and the two chips sit 97.6 px apart (> 93.4 needed).
-  // DESK_Y 5.4: a seated sprite's stacked chip block reaches ~60 px above itself, so its top lands
-  // at 5.4*T + 12 - 60 = 38.4, below the plaque band's floor at 31.
+  // DESK_Y 5.6: the measured seated chip stack (worst 2-line task bubble + name, 8 px floor font
+  // at the smallest fit scale) reaches 66 px above the sprite anchor, putting its top at
+  // 5.6*T + 12 - 66 = 35.6 — below the plaque band's floor at 34 (see theme_geometry_test).
   const ROOM_W = 12.5;                    // tiles per room
-  const DESK_Y = 5.4;
+  const DESK_Y = 5.6;
   // The desk pair is written room-LOCAL (identical for all five rooms); plan() shifts it by the
   // room's own x, since the kit paints a desk at its absolute tile x (d[0] * T).
   const ROOMS = [
@@ -68,11 +69,11 @@
         desks.push(d); DESK_ROOMS.set(dkey(d), r.id);
       }
     });
-    // Idle loiter spots: four along the corridor in front of the rooms (6.5 tiles apart, wider than
-    // two worst-case name chips) and two deep in the lounge, clear of the door cooler and the
-    // panel band at y 170. The lounge pair can touch a chip at the smallest fit scales, where
-    // placeLabels suppresses one — a 9-tile lounge physically holds one 92 px name box.
-    const loiter = [[40.0, 7.3], [46.5, 7.3], [53.0, 7.3], [59.5, 7.3], [63.4, 8.4], [66.9, 9.3]];
+    // Idle loiter spots sit BELOW the desks' stacked chips and staggered between rooms, so an
+    // idle agent's own chips (name + one zZ/☕ line ~36 px tall at k >= 0.6) never share a box
+    // with a seated chip or with another loiterer: nearest neighbours are >= 88 px apart and
+    // the lower row still clears the overlay panels at y 170.
+    const loiter = [[11.1, 9.2], [36.1, 9.2], [60.5, 9.2], [23.6, 10.35], [48.6, 10.35], [66.3, 10.35]];
     for (const [lx, ly] of loiter) lounge.push([lx, ly]);
     const out = {
       id: 'mansion-v1', desks, lounge, CW, CH, wings: 1, rows: 1, OX: 0, loungeX: LOUNGE_X,
