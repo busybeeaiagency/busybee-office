@@ -554,6 +554,8 @@
       kanbanTitle: 'Cards on the kanban for this agent', kanbanLoading: 'kanban: loading…',
       kanbanNone: 'no tasks on the board', kanbanMore: (n) => `+${n} more`,
       dispatchQueue: 'Check queue', dispatchTitle: 'Run one dispatcher pass now so idle agents pick up ready tasks',
+      // ?kiosk paints no buttons, so the nudge hides behind a press-and-hold on the office title.
+      kioskHoldHint: 'Press and hold the office title to run one dispatcher pass',
       dispatchBusy: 'checking…', dispatchFail: 'the office backend could not reach the dispatcher',
       dispatchDone: 'Dispatcher pass', dispatchDeferred: 'deferred',
       // the review column is Bart's own queue: the banner says whose turn it is, in his words
@@ -685,6 +687,7 @@
       kanbanTitle: 'Bu ajan için kanbandaki kartlar', kanbanLoading: 'kanban: yükleniyor…',
       kanbanNone: 'panoda görev yok', kanbanMore: (n) => `+${n} fazla`,
       dispatchQueue: 'Kuyruğu kontrol et', dispatchTitle: 'Boştaki ajanlar hazır görevleri alsın diye şimdi tek bir yönetici turu çalıştır',
+      kioskHoldHint: 'Tek bir yönetici turu çalıştırmak için ofis başlığına basılı tutun',
       dispatchBusy: 'kontrol ediliyor…', dispatchFail: 'ofis arkaucu yöneticiye ulaşamadı',
       dispatchDone: 'Yönetici turu', dispatchDeferred: 'ertelendi',
       // inceleme süturu Bart'ın kendi sırası: afiş kimin beklediğini onun sözleriyle söyler
@@ -805,6 +808,7 @@
       kanbanTitle: 'Karten auf dem Kanban dieses Agenten', kanbanLoading: 'Kanban: lädt…',
       kanbanNone: 'keine Aufgaben auf dem Board', kanbanMore: (n) => `+${n} mehr`,
       dispatchQueue: 'Warteschlange prüfen',
+      kioskHoldHint: 'Bürotitel gedrückt halten, um einen Dispatcher-Durchlauf zu starten',
       dispatchTitle: 'Jetzt einen Dispatcher-Durchlauf starten, damit freie Agenten bereite Aufgaben übernehmen',
       dispatchBusy: 'prüfe…', dispatchFail: 'Das Büro-Backend hat den Dispatcher nicht erreicht',
       dispatchDone: 'Dispatcher-Durchlauf', dispatchDeferred: 'zurückgestellt',
@@ -938,6 +942,7 @@
       kanbanTitle: 'Tarjetas en el kanban de este agente', kanbanLoading: 'kanban: cargando…',
       kanbanNone: 'no hay tareas en el tablero', kanbanMore: (n) => `+${n} más`,
       dispatchQueue: 'Comprobar la cola',
+      kioskHoldHint: 'Mantén pulsado el título de la oficina para ejecutar una pasada del dispatcher',
       dispatchTitle: 'Ejecuta ahora una pasada del dispatcher para que los agentes libres tomen las tareas listas',
       dispatchBusy: 'comprobando…', dispatchFail: 'el backend de la oficina no pudo contactar con el dispatcher',
       dispatchDone: 'Pasada del dispatcher', dispatchDeferred: 'aplazada',
@@ -1071,6 +1076,7 @@
       kanbanTitle: 'Les cartes du kanban de cet agent', kanbanLoading: 'kanban : chargement…',
       kanbanNone: 'aucune tâche sur le tableau', kanbanMore: (n) => `+${n} en plus`,
       dispatchQueue: 'Vérifier la file',
+      kioskHoldHint: 'Maintenez le titre du bureau enfoncé pour lancer une passe du dispatcher',
       dispatchTitle: 'Lancer maintenant une passe du dispatcher pour que les agents libres prennent les tâches prêtes',
       dispatchBusy: 'vérification…', dispatchFail: 'le backend du bureau n’a pas pu joindre le dispatcher',
       dispatchDone: 'Passe du dispatcher', dispatchDeferred: 'reportée',
@@ -1204,6 +1210,7 @@
       kanbanTitle: '该代理在看板上的卡片', kanbanLoading: '看板：加载中…',
       kanbanNone: '看板上没有任务', kanbanMore: (n) => `+${n} 更多`,
       dispatchQueue: '检查队列',
+      kioskHoldHint: '长按办公室标题即可运行一次调度轮',
       dispatchTitle: '立即运行一次调度轮，让空闲代理领取就绪任务',
       dispatchBusy: '检查中…', dispatchFail: '办公后端无法连接调度器',
       dispatchDone: '调度轮结果', dispatchDeferred: '已延后',
@@ -1337,6 +1344,7 @@
       kanbanTitle: 'بطاقات هذا الوكيل على اللوح', kanbanLoading: 'اللوح: جارٍ التحميل…',
       kanbanNone: 'لا مهام على اللوح', kanbanMore: (n) => `+${n} أخرى`,
       dispatchQueue: 'افحص الطابور',
+      kioskHoldHint: 'اضغط مطولًا على عنوان المكتب لتشغيل جولة واحدة للمُوزِّع',
       dispatchTitle: 'شغّل جولة واحدة للمُوزِّع الآن ليبدأ الوكلاء المتفرغون المهام الجاهزة',
       dispatchBusy: 'جارٍ الفحص…', dispatchFail: 'لم يستطع خادم المكتب الوصول إلى المُوزِّع',
       dispatchDone: 'جولة المُوزِّع', dispatchDeferred: 'مُرجَّأة',
@@ -2668,8 +2676,12 @@
   // "Check queue": one dispatcher pass, the same door the Hermes dashboard uses. The office never
   // claims a card itself — it asks the dashboard for a single pass so idle agents pick up ready
   // work. Nothing secret travels here: the dashboard password stays server-side, only a bare {} goes.
+  // The button's own `disabled` is not enough: the kiosk has no button (a hold on the title calls
+  // this with a bare stand-in), and two triggers in the same breath would be two dispatcher passes.
+  let dispatchInFlight = false;
   async function checkQueue(btn) {
-    if (!btn || btn.disabled) return;                      // one nudge at a time
+    if (!btn || btn.disabled || dispatchInFlight) return;   // one nudge at a time
+    dispatchInFlight = true;
     const was = btn.textContent;
     btn.disabled = true; btn.textContent = `📥 ${L.dispatchBusy || EN.dispatchBusy}`;
     // The backend already names the reason (memory pressure, host cap, per-profile cap) in `message`;
@@ -2709,10 +2721,43 @@
       showToast('err', `⚠ ${L.dispatchDone || EN.dispatchDone}`, [L.dispatchFail || EN.dispatchFail]);
     }
     finally {
+      dispatchInFlight = false;
       btn.disabled = false; btn.textContent = was;
       renderNav();                                          // rebuild the nav from the caps, as always
       poll();                                               // and show the new runs inside one cycle
     }
+  }
+
+  // ?kiosk: the TV shows a read-only office — no nav, and no cursor to click anything with. The
+  // dispatcher nudge lives behind a press-and-hold on the office title, the one thing always in the
+  // corner of the screen. A plain tap does nothing on purpose, so wiping the screen or bumping the
+  // TV never spends a dispatcher pass; the answer comes back in the toast, which is kiosk-safe.
+  // The hold dims the title while it counts (inline style, so no CSS of ours is added); a release
+  // before the timer lands takes the dim back off, which is also how the operator sees a tap was
+  // ignored rather than missed.
+  const holdH1 = document.querySelector('header h1');
+  if (KIOSK && holdH1) {
+    holdH1.title = L.kioskHoldHint || EN.kioskHoldHint;
+    const HOLD_MS = 650;
+    let holdTimer = 0;
+    const holdStart = () => {
+      if (holdTimer) return;                                  // already counting; don't restart it
+      holdH1.style.opacity = '.55';                           // "keep holding" — no new CSS rule
+      holdTimer = setTimeout(() => {
+        holdTimer = 0;
+        holdH1.style.opacity = '';
+        checkQueue({ disabled: false, textContent: '' });     // a stand-in for the 📥 button
+      }, HOLD_MS);                                            // cleared below, so exactly once per hold
+    };
+    const holdCancel = () => {
+      clearTimeout(holdTimer); holdTimer = 0;
+      holdH1.style.opacity = '';
+    };
+    // passive: nothing here wants to stop the browser's own gesture; the gear and #status are
+    // separate nodes outside the title, so they keep their clicks.
+    holdH1.addEventListener('pointerdown', holdStart, { passive: true });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave'])
+      holdH1.addEventListener(ev, holdCancel, { passive: true });
   }
 
   async function poll() {
