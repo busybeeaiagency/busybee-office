@@ -15,6 +15,8 @@ Endpoints (the page discovers the feed through /config.json):
   GET  /healthz              liveness for the container
   GET  /api/appearance       {} (looks live in the browser's localStorage)
   GET  /api/cubicle/settings {"createTasks": false, ...}
+  GET  /api/cubicle/dispatch {"enabled": false, ...} — the stock CEO task box, switched off here
+  POST /api/cubicle/dispatch 405 not_supported (a stray POST gets an answer, not a bare 404)
   anything else              a file from public/, else 404
 
 No credential is ever written into a response: the Mattermost token and the Beszel/Kuma
@@ -37,6 +39,8 @@ PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 DB_PATH = os.environ.get("OFFICE_DB", f"{sources.HERMES_DIR}/kanban.db")
 PORT = int(os.environ.get("OFFICE_PORT", "9120"))
 BUILD = os.environ.get("OFFICE_BUILD", "busybee-office")
+
+CEO_OFF = "the office backend has no CEO task runner; use Check queue for one dispatcher pass"
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -142,6 +146,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _read_body(self):
+        """Drain a request body before answering, whatever we answer with.
+
+        Nobody sends one to these routes today. Cheap insurance against a 405/404 that leaves the
+        bytes unread: keep-alive would hand the next request's FIRST LINE to whoever parses what is
+        left in the socket. Same reason `_dispatch_pass` reads its length.
+        """
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+
     def _static(self, path):
         rel = unquote(path).lstrip("/")
         full = os.path.realpath(os.path.join(PUBLIC_DIR, rel))
@@ -220,6 +235,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {})
         if path == "/api/cubicle/settings":
             return self._send(200, {"createTasks": False, "canEdit": False, "available": False})
+        if path == "/api/cubicle/dispatch":
+            # The vendored CEO task box asks on EVERY page load (public/index.html:5266, 5275,
+            # 5455) and this server has no such runner, so the container access log filled with a
+            # 404 that meant "not here". Answer it the way /api/cubicle/settings answers its poll:
+            # a 200 that turns the feature off. The client reads `enabled` -> its dialog stays
+            # closed, and `runs` -> it renders an empty list rather than null.
+            return self._send(200, {"enabled": False, "runs": [], "available": False,
+                                    "reason": CEO_OFF})
         if path.startswith("/api/"):
             return self._send(404, '{"error":"not found"}')
         return self._static(path)
@@ -241,6 +264,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/office/dispatch":
             return self._dispatch_pass()
+        if path == "/api/cubicle/dispatch":
+            # The other half of the CEO task box: it POSTs a task when the dialog is open. A stray
+            # POST (an older page, a curl) gets an answer that names the route we do have, instead
+            # of the bare 404 this was.
+            self._read_body()
+            return self._send(405, {"ok": False, "error": "not_supported", "message": CEO_OFF})
         if path != "/api/office/action":
             return self._send(404, '{"error":"not found"}')
         rec = {"ts": int(time.time()), "actor": "dashboard"}

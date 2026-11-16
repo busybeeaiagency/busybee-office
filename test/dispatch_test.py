@@ -11,6 +11,7 @@ actions both read it at call time), and dispatch.reset() in setUp so the 15 s sl
 between tests.
 """
 import http.server
+import io
 import json
 import os
 import sys
@@ -20,13 +21,24 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server import dispatch  # noqa: E402
+from server import dispatch, office  # noqa: E402
 
 PW = "pw-canary-4f9c"                                   # grep for this in everything that gets written
-ANSWER = {"spawned": [["t_one", "coder"], ["t_two", "maya"]], "reclaimed": 1, "promoted": 0,
-          "auto_blocked": 0, "crashed": 0, "stale": 0, "skipped_locked": False}
-EMPTY = {"spawned": [], "reclaimed": 0, "promoted": 0, "auto_blocked": 0, "crashed": 0,
-         "stale": 0, "skipped_locked": False}
+# THE LIVE SHAPE, verbatim from a probe of :9119/api/plugins/kanban/dispatch on 2026-11-16: spawned
+# is a list of (task, assignee, workspace) TRIPLES and auto_blocked / crashed / stale / timed_out are
+# LISTS of task ids, not counts. int() of a non-empty list raises TypeError, so the old int()-only
+# reader reported 0 for every one of them while cards sat there blocked — hence these fixtures carry
+# the lists, and the assertions below read their LENGTHS.
+ANSWER = {"spawned": [["t_one", "coder", "/w/one"], ["t_two", "maya", ""]], "reclaimed": 1,
+          "promoted": 0, "reconciled_orphans": [], "reaped_terminal_workers": [],
+          "auto_blocked": [], "crashed": ["t_three"], "stale": [], "timed_out": ["t_four"],
+          "skipped_unassigned": [], "auto_assigned_default": [], "skipped_nonspawnable": [],
+          "skipped_per_profile_capped": [], "skipped_locked": False, "memory_pressure": None}
+EMPTY = {"spawned": [], "reclaimed": 0, "promoted": 0, "reconciled_orphans": [],
+         "reaped_terminal_workers": [], "auto_blocked": [], "crashed": [], "stale": [],
+         "timed_out": [], "skipped_unassigned": [], "auto_assigned_default": [],
+         "skipped_nonspawnable": [], "skipped_per_profile_capped": [], "skipped_locked": False,
+         "memory_pressure": None}
 
 
 class FakeServer(http.server.ThreadingHTTPServer):
@@ -133,7 +145,13 @@ class DispatchTest(unittest.TestCase):
                                            {"task": "t_two", "assignee": "maya"}])
         self.assertEqual(body["spawned_n"], 2)
         self.assertEqual([body["reclaimed"], body["promoted"], body["auto_blocked"]], [1, 0, 0])
+        # the LIVE-shape pin: crashed/stale/timed_out arrive as LISTS of ids, so a counter that
+        # int()-coerces them reads 0 and a blocked card is invisible. Length is the count.
+        self.assertEqual(body["crashed"], 1)                       # ["t_three"] -> 1, not 0
+        self.assertEqual(body["stale"], 0)                         # ... and an empty list stays 0
         self.assertEqual(body["message"], "spawned 2 · reclaimed 1 · promoted 0")
+        self.assertEqual((body["deferred"], body["deferred_n"], body["suppression"]),
+                         ([], 0, ""))                             # nothing was held back here
         self.assertEqual(len(self.srv.logins), 1)
         self.assertEqual(self.srv.logins[0], {"provider": "basic", "username": "hermes",
                                               "password": PW})
@@ -152,6 +170,66 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(len(self.srv.logins), 2)          # one re-login, not a loop
         self.assertEqual(len(self._dispatch_hits()), 2)    # the refused one and the retry
+
+    # ---------- why nothing was spawned: the deferred half of the answer ----------
+    def test_a_saturated_pass_names_every_reason_it_held_work_back(self):
+        """The t_b41a882a case: 200, zero spawns, and the page had nothing honest to say about it."""
+        self.srv.answer = dict(EMPTY, memory_pressure="critical", skipped_host_capped=[8, 5],
+                               skipped_per_profile_capped=[["t_a", "coder", 1]],
+                               respawn_guarded=[["t_b", "active_pr"]])
+        code, body, _ = dispatch.nudge({})
+        self.assertEqual(code, 200)
+        self.assertEqual(body["spawned_n"], 0)
+        self.assertTrue(body["deferred_n"] >= 3)                    # both cards + both board holds
+        ids = [row[0] for row in body["deferred"]]
+        self.assertEqual(ids, ["t_a", "t_b"])                       # capped at 8, but naming both
+        self.assertEqual(body["deferred"][1][1], "active_pr")        # the guard reason travels too
+        suppression = body["suppression"]
+        self.assertIn("memory_pressure=critical", suppression)       # the dispatcher's own words
+        self.assertIn("host cap reached (8/5 in progress)", suppression)
+        self.assertIn("per_profile_capped=1", suppression)
+        self.assertIn("active_pr=1", suppression)
+        self.assertTrue(len(suppression) < 180)                      # a line has to fit on the TV
+        self.assertIn("deferred:", body["message"])
+        self.assertIn("nothing to do", body["message"].split(" · deferred: ")[0])
+        self.assertTrue(len(body["message"]) <= 240)
+        self.assertNotIn(PW, json.dumps(body))
+        # ... and the log line keeps the same truth, ids only, still no credential
+        line = self._log_lines()[0]
+        self.assertEqual(line["deferred"], ["t_a", "t_b"])
+        self.assertEqual(line["deferred_n"], body["deferred_n"])
+        self.assertEqual(line["suppression"], suppression)
+        self.assertNotIn(PW, json.dumps(line))
+
+    def test_an_empty_board_defers_nothing_and_says_so_plainly(self):
+        self.srv.answer = dict(EMPTY)
+        code, body, _ = dispatch.nudge({})
+        self.assertEqual(code, 200)
+        self.assertEqual(body["suppression"], "")                   # nothing to name
+        self.assertEqual(body["message"], "nothing to do")          # and nothing else on the line
+        self.assertEqual((body["deferred"], body["deferred_n"]), ([], 0))
+        self.assertNotIn(PW, json.dumps(body))
+        self.assertNotIn(PW, json.dumps(self._log_lines()))
+
+    def test_a_dashboard_that_sends_rubbish_in_a_bucket_still_answers_200(self):
+        """Every bucket is a .get() on a payload we do not own: none of these may raise."""
+        for key, value in (("skipped_per_profile_capped", "not-a-list"),
+                           ("respawn_guarded", [[None], ["t_b"], 7, {"task": "t_c"}]),
+                           ("skipped_host_capped", ["x", "y"]), ("memory_pressure", {"a": 1}),
+                           ("rate_limited", None), ("auto_blocked", {"t_z": "why"})):
+            self.srv.answer = dict(EMPTY, **{key: value})
+            code, body, _ = dispatch.nudge({}, dry_run=True)
+            self.assertEqual(code, 200, f"{key}={value!r} must not raise")
+            self.assertTrue(len(body["message"]) <= 240)
+            self.assertNotIn(PW, json.dumps(body))
+
+    def test_a_reason_that_echoed_the_dashboard_password_is_masked(self):
+        """Rule 1 of AGENTS.md is about the response body, and the reason text is the dashboard's."""
+        self.srv.answer = dict(EMPTY, respawn_guarded=[["t_b", f"https://hermes:{PW}@10.10.10.202"]])
+        code, body, _ = dispatch.nudge({})
+        self.assertEqual(code, 200)
+        self.assertNotIn(PW, json.dumps(body))
+        self.assertNotIn(PW, json.dumps(self._log_lines()))
 
     # ---------- the two things that must never happen ----------
     def test_the_password_never_leaves_the_process(self):
@@ -220,6 +298,52 @@ class DispatchTest(unittest.TestCase):
         dark = dispatch.capability()
         self.assertFalse(dark["available"])
         self.assertIn("not-here.json", dark["reason"])     # the reason names the file we could not read
+
+
+class StockCeoRouteTest(unittest.TestCase):
+    """The vendored client GETs /api/cubicle/dispatch on EVERY page load; we must answer, not 404.
+
+    No second server: BaseHTTPRequestHandler starts talking HTTP inside its own constructor, so the
+    fixture is `Handler.__new__` plus the three attributes the two do_* methods actually read
+    (headers, path, rfile), and `_send` is monkeypatched ON THE INSTANCE — the real one wants a live
+    socket to write to. That is enough to pin the status, the body and the route order.
+    """
+
+    def _handler(self, path, body=b""):
+        h = office.Handler.__new__(office.Handler)
+        h.headers = {"Content-Length": str(len(body)), "x-cubicle": "1"}
+        h.path = path
+        h.rfile = io.BytesIO(body)
+        h.sent = []
+        h._send = lambda code, payload, **kw: h.sent.append((code, payload, kw))
+        return h
+
+    def test_the_stock_ceo_poll_gets_a_200_that_switches_the_feature_off(self):
+        h = self._handler("/api/cubicle/dispatch")
+        h.do_GET()
+        (code, body, _) = h.sent[0]
+        self.assertEqual(code, 200)                              # was 404 on every single page load
+        self.assertIs(body["enabled"], False)                    # ... so the dialog stays closed
+        self.assertEqual(body["runs"], [])                       # and the run list renders empty
+        self.assertIs(body["available"], False)
+        self.assertIn("Check queue", body["reason"])             # the route that DOES exist
+
+    def test_a_stray_post_is_answered_and_its_body_drained(self):
+        h = self._handler("/api/cubicle/dispatch", b'{"text":"do something"}')
+        h.do_POST()
+        (code, body, _) = h.sent[0]
+        self.assertEqual(code, 405)                              # an answer, not a bare 404
+        self.assertEqual((body["ok"], body["error"]), (False, "not_supported"))
+        self.assertEqual(body["message"], office.CEO_OFF)           # names the route that does exist
+        self.assertEqual(h.rfile.read(), b"")                    # keep-alive: nothing left in the socket
+
+    def test_the_catch_all_404_still_covers_every_other_api_path(self):
+        h = self._handler("/api/cubicle/not-a-route")
+        h.do_GET()
+        self.assertEqual(h.sent[0][0], 404)                      # the new route did not swallow it
+        h2 = self._handler("/api/cubicle/settings")
+        h2.do_GET()
+        self.assertEqual(h2.sent[0][0], 200)                     # the older precedent still answers
 
 
 if __name__ == "__main__":
