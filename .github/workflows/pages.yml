@@ -26,13 +26,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - id: configure_pages
+        uses: actions/configure-pages@v5
       # the page itself, plus what search engines and link previews look for
       - name: Assemble the site
         run: |
           mkdir _site && cp -r public/. _site/ && cp docs/social.png _site/social.png
-          printf 'User-agent: *\nAllow: /\nSitemap: https://caglarutkuguler.github.io/cubicle/sitemap.xml\n' > _site/robots.txt
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n<url><loc>https://caglarutkuguler.github.io/cubicle/</loc><lastmod>%s</lastmod></url>\n</urlset>\n' "$(date -u +%F)" > _site/sitemap.xml
+          SITE_URL="${{ steps.configure_pages.outputs.page_url }}"
+          SITE_URL="${SITE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}"
+          printf 'User-agent: *\nAllow: /\nSitemap: %ssitemap.xml\n' "$SITE_URL" > _site/robots.txt
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n<url><loc>%s</loc><lastmod>%s</lastmod></url>\n</urlset>\n' "$SITE_URL" "$(date -u +%F)" > _site/sitemap.xml
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
