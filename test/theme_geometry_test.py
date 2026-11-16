@@ -1,16 +1,21 @@
-"""Render-determinism tests: the theme must own the canvas geometry, and the room plaques must
-stay out of the band the agent chips occupy.
+"""Render-determinism tests: the theme must own the canvas geometry, and the agent labels must
+clear the wall band, the canvas edge and each other.
 
-Both invariants are about a race and a collision that only showed up in a real browser, so the
-guard is on the source that caused them:
+All of these are about collisions that only showed up in a real browser, so the guard is on the
+source that caused them:
 
 * `applySettings` used to end in `resizeCanvas()`, which repaints with whatever CW/CH the stock
   layout last chose. When the feed answered before the theme chain (measured on ~15% of loads), the
   mansion was drawn into the stock 352x208 canvas — the ~2x-cropped render with the labels clipped
   and the ticker off-frame — and stayed there, because `layoutFor` early-returns while the agent
   count is unchanged and only a window resize re-ran it. Applying a theme must re-run the layout.
-* The room plaques sat at office y 35..48, which is exactly where an agent's task+name chips land
-  (measured, y 34..48), so every room name was half covered on a correct load too.
+* The room plaques sat at office y 35..48, which is exactly where an agent's task+name chips land,
+  so every room name was half covered on a correct load too. They now own y 18..31.
+* The rebuilt plan is 12.5-tile rooms (ROOM_W), a desk pair at 1.8 / 7.9 tiles and DESK_Y 5.4,
+  sized from the measured label footprint: a name chip is at worst 40.6 css px wide on a side
+  (29.5 px at the 8 px font floor), a task bubble is 80 px across, and a seated sprite sits at
+  (desk_x*T + 22, desk_y*T + 12) with the stacked block reaching ~60 px above itself. See
+  LabelsClearTheGeometry for the three inequalities those numbers imply.
 
 Run:  python3 -m unittest test.theme_geometry_test -v
 """
@@ -41,7 +46,7 @@ def wall_numbers():
     assert matched, "the client's tile size is unparseable — the test needs updating"
     windows = [(int(m.group(1)), int(m.group(2)))
                for m in re.finditer(r"K\.window\(c,\s*[^,]+,\s*(\d+),\s*[^,]+,\s*(\d+),", THEME)]
-    sign_m = re.search(r"K\.sign\(c,\s*CW / 2,\s*(\d+)", THEME)
+    sign_m = re.search(r"K\.sign\(c,\s*[^,]+,\s*(\d+)", THEME)
     assert sign_m, "the company sign's baseline is unparseable"
     sign = int(sign_m.group(1))
     plaques = [(int(m.group(1)), int(m.group(2)))
@@ -92,7 +97,9 @@ class PlaquesClearTheChips(unittest.TestCase):
 
     def test_wall_stack_does_not_collide_with_itself(self):
         windows, sign, plaques = wall_numbers()
-        self.assertEqual(len(windows), 2)
+        self.assertEqual(len(windows), 1,
+                         "one window call site (the room loop) hangs a window on every room wall; "
+                         "a second one is how a window ends up in an unrelated place again")
         plaque_top = min(y for y, _ in plaques)
         for y, h in windows:
             self.assertLessEqual(y + h, plaque_top, "a window overlaps the plaque line")
@@ -102,6 +109,39 @@ class PlaquesClearTheChips(unittest.TestCase):
         """Six plaques, one line — a lone y constant here is how a room ends up covered again."""
         _, _, plaques = wall_numbers()
         self.assertEqual({y for y, _ in plaques}, {min(y for y, _ in plaques)})
+
+
+ROOM_W = float(re.search(r"const ROOM_W = ([\d.]+);", THEME).group(1))
+
+
+class LabelsClearTheGeometry(unittest.TestCase):
+    """The label footprint, measured in a live browser at the fit view (k = clientWidth / CW):
+    a name chip is at worst 40.6 css px wide on a side (11 px cap), 29.5 px at the 8 px floor; a
+    task bubble is capped at 80 px; the stacked block reaches ~56-60 px above the sprite. The chips
+    scale with the canvas, so clearing them at fit (k >= ~0.63, 46 px half-width) clears them at
+    every zoom.
+    """
+
+    def test_chips_top_out_below_the_plaque_band(self):
+        desk_y = float(re.search(r"const DESK_Y = ([\d.]+);", THEME).group(1))
+        self.assertGreater(desk_y * T + 12 - 60, 31,
+                           "a seated agent's stacked chips reach into the plaque band (y 18..31)")
+
+    def test_desk_pair_clears_the_edge_the_room_and_each_other(self):
+        pairs = re.findall(r"desks: \[\[(\d+(?:\.\d+)?), DESK_Y\], \[(\d+(?:\.\d+)?), DESK_Y\]\]", THEME)
+        self.assertEqual(len(pairs), len(re.findall(r"\{ id: '", THEME)),
+                         "every room must carry the same desk pair")
+        for d1_s, d2_s in pairs:
+            d1, d2 = float(d1_s), float(d2_s)
+            # the seated sprite is at desk_x * T + 22; its worst-case chip half must stay on canvas
+            self.assertGreaterEqual(d1 * T + 22, 48,
+                                    "the left desk's label clips off the canvas edge at fit")
+            # ...and inside its own room, so two rooms' labels never overlap
+            self.assertLessEqual(d2 * T + 22 + 46, ROOM_W * T,
+                                 "the right desk's worst-case name chip reaches into the next room")
+            # two worst-case 8 px name chips on the same row must never touch
+            self.assertGreaterEqual((d2 - d1) * T, 93.4,
+                                    "the two name chips in a room collide")
 
 
 if __name__ == "__main__":

@@ -6,22 +6,26 @@
   const K = window.CubicleKit, T = K.T;
 
   // ---- floor plan (tiles; the page multiplies by T) ----------------------------------------
-  const ROOM_W = 7;                       // tiles per room
-  // The desk row sits at 5.0 tiles, not the 3.5 it used to be: an agent's task+name chips hang
-  // ~1.2 tiles over its head, and at 3.5 those chips landed on the wall plaque line (office y
-  // 18..31) and grazed the room name on every load — the "labels clipped / misaligned" complaint.
-  // One tile down puts the chips at y ~47..60, clear of the wall, and leaves the room furniture
-  // (shelf, arcade, rack: y 41..86) behind the desks, which is what it is drawn to look like.
-  const DESK_Y = 5.0;
+  // Rooms are 12.5 tiles so a room's two name chips can never touch: the chips are DOM boxes
+  // measured at 40.6 css px half-width (11 px cap) / 29.5 px (8 px floor) at scale k = clientWidth/CW.
+  // Desk offsets are room-LOCAL (plan() adds the room's own x): at 1.8 and 7.9 tiles the seated
+  // sprite (desk_x*T + 22) keeps its worst-case 46 px chip half inside the canvas edge (50.8 >= 48)
+  // and inside its own room (194.4 <= 200), and the two chips sit 97.6 px apart (> 93.4 needed).
+  // DESK_Y 5.4: a seated sprite's stacked chip block reaches ~60 px above itself, so its top lands
+  // at 5.4*T + 12 - 60 = 38.4, below the plaque band's floor at 31.
+  const ROOM_W = 12.5;                    // tiles per room
+  const DESK_Y = 5.4;
+  // The desk pair is written room-LOCAL (identical for all five rooms); plan() shifts it by the
+  // room's own x, since the kit paints a desk at its absolute tile x (d[0] * T).
   const ROOMS = [
-    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[0.5, DESK_Y], [4.4, DESK_Y]] },
-    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[7.5, DESK_Y], [11.4, DESK_Y]] },
-    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[14.5, DESK_Y], [18.4, DESK_Y]] },
-    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[21.5, DESK_Y], [25.4, DESK_Y]] },
-    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[28.5, DESK_Y], [32.4, DESK_Y]] },
+    { id: 'coding', en: 'Coding', tr: 'Kodlama', accent: '#2f6fed', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
+    { id: 'gamedev', en: 'Game Dev', tr: 'Oyun', accent: '#8b5cf6', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
+    { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
+    { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
+    { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[1.8, DESK_Y], [7.9, DESK_Y]] },
   ];
-  const LOUNGE_X = 35;                    // tiles; x where the lounge starts
-  const CW_TILES = 41;                    // 5 rooms + lounge
+  const LOUNGE_X = 5 * ROOM_W;            // tiles; x where the lounge starts (62.5)
+  const CW_TILES = 5 * ROOM_W + 9;        // 5 rooms + lounge (71.5)
   const CW = CW_TILES * T, CH = 13 * T;
 
   // desk tile -> room id, so the seat picker and the desk painter agree
@@ -61,7 +65,7 @@
       for (const d of r.desks) { desks.push(d); DESK_ROOMS.set(dkey(d), r.id); }
     }
     for (let i = 0; i < 10; i++) {
-      lounge.push([35.4 + (i % 5) * 1.05, 3.4 + Math.floor(i / 5) * 4.6 + (i % 2) * 0.8]);
+      lounge.push([LOUNGE_X + 1.2 + (i % 5) * 1.8, 6.9 + Math.floor(i / 5) * 1.1 + (i % 2) * 0.3]);
     }
     const out = {
       id: 'mansion-v1', desks, lounge, CW, CH, wings: 1, rows: 1, OX: 0, loungeX: LOUNGE_X,
@@ -103,25 +107,26 @@
     // floor: slate in the work area, warm planks in the lounge
     K.floor(c, { work: ['#3b414d', '#363c47'], lounge: ['#5d4832', '#55422e'], split: LOUNGE_X * T, grout: 'rgba(0,0,0,.20)' });
     K.wall(c, { top: '#242a35', bottom: '#1a1f29', trim: 'rgba(0,0,0,.45)', band: 'rgba(255,255,255,.05)' });
+    const rx = (i) => i * ROOM_W * T;      // room i's left edge, in office px
 
-    // windows on the wall (two, over the work area)
-    // The wall strip is y 0..WALL_TOP (32); everything an agent or its name chip occupies starts at
-    // y 34 (measured: the two stacked chips over a desk at 3.5 tiles land at office y 34..48, exactly
-    // where the plaques used to sit, so the room names were half covered on every load). So the wall
-    // is stacked top-down with a unit of clearance each: windows 2..18, the company sign at 10
-    // (centred between the windows, never over a plaque), room plaques 18..31, and nothing of ours
-    // below that until the desks. The chips scale with the canvas, so clearing them at fit clears
-    // them at every zoom.
-    K.window(c, 1.5 * T, 2, 2.6 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 3));
-    K.window(c, 36.4 * T, 2, 2.6 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 11));
+    // The wall strip is y 0..WALL_TOP (32) and the room plaques own 18..31, so above the plaques
+    // there is one band — 0..17 — for everything else hung on the wall. Measured: an agent's stacked
+    // name+task chips top out at desk_y*T + 12 - 60 = 38.4, so nothing of ours is drawn below y 17
+    // until that band starts, and each row of the stack keeps its own clearance.
+    // One window per room wall (the research wall carries the company sign instead), 112 px wide
+    // with its 1.2 px frame: x 2.75..9.75 tiles inside a 12.5-tile room, y 2..18 including the frame.
+    ROOMS.forEach((r, i) => {
+      if (r.id === 'research') return;
+      K.window(c, rx(i) + 2.75 * T, 2, 7 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 3 + i));
+    });
 
-    // company name on the wall, centred over the whole floor — between the two windows, above the
-    // plaque line (y 10 with ~6-unit glyphs stays inside 2..17; the plaques start at 18)
-    K.sign(c, CW / 2, 10, { color: '#d8b25a', size: 6 });
+    // company name on the research wall, centred on it (the room spans x 2..3 tiles of its own
+    // 12.5; y 12 with size-7 glyphs stays above the plaque line at 18)
+    K.sign(c, 2.5 * ROOM_W * T, 12, { color: '#d8b25a', size: 7 });
 
     // room plaques on the back wall of each room: the wall strip ends at WALL_TOP (32) and the
-    // agents' name/task chips begin at y 34, so 18..31 is the only band the room name can live in
-    // and still be readable on every load — measured, the old y 35..48 sat exactly under the chips.
+    // agents' worst-case stacked chips begin at y 38.4, so 18..31 is the band the room name lives in
+    // — readable, and never under a chip.
     for (const r of ROOMS) {
       const x0 = ROOMS.indexOf(r) * ROOM_W * T;
       K.rr('#12151c', x0 + 10, 18, ROOM_W * T - 20, 13, 1.5);
@@ -134,37 +139,38 @@
 
     drawWalls(c);
 
-    // corridor rug in front of the rooms
-    K.rr('rgba(216,178,90,.14)', 6, 7.6 * T, 34 * T, 2.6 * T, 4);
-    K.rect('rgba(216,178,90,.35)', 6, 7.6 * T, 34 * T, 1);
-    K.rect('rgba(216,178,90,.35)', 6, 10.1 * T, 34 * T, 1);
+    // corridor rug in front of the rooms: from the left edge to just before the lounge partition
+    K.rr('rgba(216,178,90,.14)', 2 * T, 7.6 * T, (LOUNGE_X - 2.5) * T, 2.6 * T, 4);
+    K.rect('rgba(216,178,90,.35)', 2 * T, 7.6 * T, (LOUNGE_X - 2.5) * T, 1);
+    K.rect('rgba(216,178,90,.35)', 2 * T, 10.1 * T, (LOUNGE_X - 2.5) * T, 1);
 
-    // per-room furniture (behind the desks, drawn with the room)
-    const rx = (i) => i * ROOM_W * T;
-    K.shelf(rx(0) + 2, 2.6 * T, 3.2 * T, 1.6 * T, { wood: '#4a3a28' });
-    K.plant(rx(0) + 6.2 * T, 5.4 * T, { size: 1 });
+    // per-room furniture (behind the desks, drawn with the room). Every relative x offset is 1.78x
+    // the old 7-tile layout's (12.5/7) so the props spread across the wider rooms; each piece stays
+    // inside x 0.4..12.1 tiles of its own room, clear of the room walls on both sides.
+    K.shelf(rx(0) + 0.6 * T, 2.6 * T, 3.2 * T, 1.6 * T, { wood: '#4a3a28' });
+    K.plant(rx(0) + 11.0 * T, 5.4 * T, { size: 1 });
     // Game Dev: arcade cabinet + a beanbag
-    K.rr('#1d1230', rx(1) + 0.6 * T, 2.7 * T, 2.2 * T, 2.6 * T, 2);
-    K.rect('#8b5cf6', rx(1) + 0.8 * T, 2.9 * T, 1.8 * T, 1.1 * T);
-    K.rect('#0b0716', rx(1) + 0.8 * T, 4.0 * T, 1.8 * T, 0.5 * T);
-    K.circle(Math.floor(c.t * 2) % 2 ? '#ff5a5a' : '#5fe08a', rx(1) + 1.0 * T, 4.2 * T, 0.8);
-    K.ellipse('#3d2f63', rx(1) + 5.4 * T, 5.6 * T, 2.2, 1.2);
+    K.rr('#1d1230', rx(1) + 1.1 * T, 2.7 * T, 2.2 * T, 2.6 * T, 2);
+    K.rect('#8b5cf6', rx(1) + 1.4 * T, 2.9 * T, 1.8 * T, 1.1 * T);
+    K.rect('#0b0716', rx(1) + 1.4 * T, 4.0 * T, 1.8 * T, 0.5 * T);
+    K.circle(Math.floor(c.t * 2) % 2 ? '#ff5a5a' : '#5fe08a', rx(1) + 1.8 * T, 4.2 * T, 0.8);
+    K.ellipse('#3d2f63', rx(1) + 9.6 * T, 5.6 * T, 2.2, 1.2);
     // Research: server rack with blinking lights + a table of papers
-    K.rr('#14171d', rx(2) + 0.4 * T, 2.6 * T, 2.4 * T, 2.8 * T, 1);
+    K.rr('#14171d', rx(2) + 0.7 * T, 2.6 * T, 2.4 * T, 2.8 * T, 1);
     for (let i = 0; i < 5; i++) {
-      K.rect('#0a0d12', rx(2) + 0.55 * T, (2.75 + i * 0.52) * T, 2.1 * T, 0.4 * T);
-      K.circle(Math.floor(c.t * 3 + i) % 3 ? '#5fe08a' : '#2a6a3a', rx(2) + 0.7 * T, (2.95 + i * 0.52) * T, 0.45);
+      K.rect('#0a0d12', rx(2) + 1.0 * T, (2.75 + i * 0.52) * T, 2.1 * T, 0.4 * T);
+      K.circle(Math.floor(c.t * 3 + i) % 3 ? '#5fe08a' : '#2a6a3a', rx(2) + 1.25 * T, (2.95 + i * 0.52) * T, 0.45);
     }
-    K.table(rx(2) + 3.4 * T, 3.2 * T, 3 * T, 1.6 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 2 });
+    K.table(rx(2) + 6.05 * T, 3.2 * T, 3 * T, 1.6 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 2 });
     // Comms: whiteboard with post-its + a water cooler
-    K.rr('#e8ecf1', rx(3) + 0.5 * T, 2.6 * T, 4 * T, 2 * T, 1);
+    K.rr('#e8ecf1', rx(3) + 0.9 * T, 2.6 * T, 4 * T, 2 * T, 1);
     const notes = ['#ffd23f', '#ff8fa3', '#7fd1ff', '#9be89b'];
-    for (let i = 0; i < 4; i++) K.rect(notes[i], rx(3) + (0.8 + (i % 2) * 1.6) * T, (2.9 + Math.floor(i / 2) * 0.8) * T, 0.9 * T, 0.7 * T);
-    K.line('rgba(40,60,90,.6)', 0.4, rx(3) + 2.9 * T, 2.9 * T, rx(3) + 4.2 * T, 3.6 * T);
-    K.waterCooler(rx(3) + 5.6 * T, 2.9 * T);
+    for (let i = 0; i < 4; i++) K.rect(notes[i], rx(3) + (1.42 + (i % 2) * 2.85) * T, (2.9 + Math.floor(i / 2) * 0.8) * T, 0.9 * T, 0.7 * T);
+    K.line('rgba(40,60,90,.6)', 0.4, rx(3) + 5.16 * T, 2.9 * T, rx(3) + 7.48 * T, 3.6 * T);
+    K.waterCooler(rx(3) + 9.97 * T, 2.9 * T);
     // Art: easels with canvases
     for (let i = 0; i < 2; i++) {
-      const ex = rx(4) + (0.9 + i * 2.6) * T, ey = 2.8 * T;
+      const ex = rx(4) + (1.6 + i * 4.63) * T, ey = 2.8 * T;
       K.line('#7a5a34', 0.6, ex - 1.4 * T / 2, ey + 2.6 * T, ex, ey);
       K.line('#7a5a34', 0.6, ex + 1.4 * T / 2, ey + 2.6 * T, ex, ey);
       K.rr('#f4f1ea', ex - 1.1 * T, ey + 0.3 * T, 2.2 * T, 1.9 * T, 0.8);
@@ -172,25 +178,24 @@
       K.circle(i ? '#eab308' : '#22c55e', ex + 0.6 * T, ey + 0.9 * T, 0.35 * T);
     }
 
-    // lounge: rug, plants, wall clock and the status board
-    K.rr('rgba(245,158,11,.16)', (LOUNGE_X + 0.5) * T, 6.4 * T, (CW_TILES - LOUNGE_X - 1) * T, 4.4 * T, 5);
-    K.plant((LOUNGE_X + 0.4) * T, 9.8 * T, { size: 1.3 });
-    K.plant(CW - 0.6 * T, 9.8 * T, { size: 1.3 });
-    K.clock(c, CW - 22, 4, { color: '#ff6b4a' });
-    // The wall status board used to hang at y 4 with h 22, i.e. down to y 26 — right on top of the
-    // room plaque under it, which is why "Game Dev" read as "…e Dev". Shrunk to stay above the
-    // plaque line (plaques start at y 18); the four status bars still fit in the shorter frame.
-    K.statusBoard(c, 150, 1.5, 16, 14, { frame: '#1b1f24', bg: '#05090c' });
+    // lounge: rug and plants on the floor; the clock and the status board hang on the lounge
+    // stretch of wall (x >= LOUNGE_X * T) in the 0..17 band above the plaque line.
+    K.rr('rgba(245,158,11,.16)', (LOUNGE_X + 0.6) * T, 6.6 * T, (CW_TILES - LOUNGE_X - 1.2) * T, 3.8 * T, 5);
+    K.plant(CW - 0.9 * T, 10.4 * T, { size: 1.3 });
+    K.clock(c, LOUNGE_X * T + 1.2 * T, 3);
+    // h 14 + its 1.2 frame: y 1.5..16.7, entirely above the plaque line at y 18 — the old board
+    // hung down to y 26, right over the room name under it.
+    K.statusBoard(c, LOUNGE_X * T + 3.2 * T, 1.5, 3.4 * T, 14, { frame: '#1b1f24', bg: '#05090c' });
   }
 
   function props(c, list) {
     K.begin(c);
     // lounge furniture sorts with the characters (z = y it stands on)
-    list.push({ z: 8.4 * T, f: () => K.sofa((LOUNGE_X + 0.7) * T, 8.4 * T, 4.4 * T, { color: '#6a3f8f' }) });
-    list.push({ z: 9.2 * T, f: () => K.table((LOUNGE_X + 2.6) * T, 9.2 * T, 2.6 * T, 1.2 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 3 }) });
-    list.push({ z: 9.6 * T, f: () => K.coffeeMachine(c, (LOUNGE_X + 4.9) * T, 9.4 * T) });
-    list.push({ z: 9.8 * T, f: () => K.waterCooler((LOUNGE_X + 0.3) * T, 9.0 * T) });
-    list.push({ z: 6.2 * T, f: () => K.plant((LOUNGE_X + 0.3) * T, 5.4 * T, { size: 1.1 }) });
+    list.push({ z: 9.4 * T, f: () => K.sofa((LOUNGE_X + 1.0) * T, 9.4 * T, 4.4 * T, { color: '#6a3f8f' }) });
+    list.push({ z: 9.8 * T, f: () => K.table((LOUNGE_X + 4.4) * T, 9.8 * T, 2.8 * T, 1.2 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 3 }) });
+    list.push({ z: 9.8 * T, f: () => K.coffeeMachine(c, (LOUNGE_X + 7.1) * T, 9.8 * T) });
+    list.push({ z: 6.9 * T, f: () => K.waterCooler((LOUNGE_X + 0.5) * T, 6.9 * T) });
+    list.push({ z: 6.0 * T, f: () => K.plant((LOUNGE_X + 0.4) * T, 6.0 * T, { size: 1.1 }) });
   }
 
   function drawDesk(c, d, s) {
@@ -240,24 +245,26 @@
     const host = vitals.host || {}, svcs = vitals.services || [];
     const up = svcs.filter((s) => s.up).length;
     const row = (y, text, color) => K.text(text, 8, y, { size: 8, color, font: 'ui-monospace, Menlo, Consolas, monospace' });
-    // The panels live in the empty corridor along the bottom, clear of the rooms and their labels.
-    K.rr('rgba(6,8,12,.88)', 5, 156, 218, 46, 3);
-    row(166, `HOMELAB  cpu ${host.cpu == null ? '--' : host.cpu + '%'}  mem ${host.mem == null ? '--' : host.mem + '%'}  disk ${host.disk == null ? '--' : host.disk + '%'}`, '#eef2fa');
-    row(175.5, `services ${up}/${svcs.length} up   ${svcs.filter((s) => !s.up).map((s) => s.name).join(' ') || 'all green'}`, up === svcs.length ? '#7be3a0' : '#ffd23f');
-    row(185, `beszel ${(vitals.beszel && vitals.beszel.systems || []).length} host(s)   kuma ${(vitals.kuma && vitals.kuma.monitors || []).length} monitor(s)`, '#aeb9cf');
+    // The panels live in the strip along the bottom of the canvas (y 170..204), under both rugs and
+    // clear of every room, desk and label. Four rows at 8.5-unit pitch inside a 34-unit panel.
+    K.rr('rgba(6,8,12,.88)', 8, 170, 480, 34, 3);
+    row(177, `HOMELAB  cpu ${host.cpu == null ? '--' : host.cpu + '%'}  mem ${host.mem == null ? '--' : host.mem + '%'}  disk ${host.disk == null ? '--' : host.disk + '%'}`, '#eef2fa');
+    row(185.5, `services ${up}/${svcs.length} up   ${svcs.filter((s) => !s.up).map((s) => s.name).join(' ') || 'all green'}`, up === svcs.length ? '#7be3a0' : '#ffd23f');
+    row(194, `beszel ${(vitals.beszel && vitals.beszel.systems || []).length} host(s)   kuma ${(vitals.kuma && vitals.kuma.monitors || []).length} monitor(s)`, '#aeb9cf');
     const post = chat && chat.posts && chat.posts[chat.posts.length - 1];
-    if (post) row(194.5, `#off-topic ${post.user}: ${String(post.message).slice(0, 42)}`, '#8fd3ff');
+    if (post) row(202.5, `#off-topic ${post.user}: ${String(post.message).slice(0, 42)}`, '#8fd3ff');
 
-    // Mattermost presence: one dot per agent, green when online
+    // Mattermost presence: one dot per agent, left to right, green when online, plus the tally
     const presence = (chat && chat.presence) || {};
-    K.rr('rgba(6,8,12,.88)', CW - 140, 156, 135, 46, 3);
-    K.text('MM', CW - 134, 166, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
+    const online = KEYS.filter((id) => (presence[AGENT_MM[id]] || 'offline') === 'online').length;
+    K.rr('rgba(6,8,12,.88)', CW - 143, 170, 135, 34, 3);
+    K.text('MM presence', CW - 137, 177, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
     KEYS.forEach((id, i) => {
       const st = presence[AGENT_MM[id]] || 'offline';
       const col = st === 'online' ? '#5fe08a' : st === 'away' ? '#ffd23f' : st === 'dnd' ? '#ff5a5a' : '#5a6272';
-      K.circle(col, CW - 106 - i * 13, 166, 3.4);
+      K.circle(col, CW - 137 + i * 13, 186, 3.4);
     });
-    K.text('presence', CW - 134, 185, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
+    K.text(`${online} of ${KEYS.length} online`, CW - 137, 197, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
   }
 
   window.CubicleThemes.register({
@@ -266,6 +273,6 @@
     scale: 4, smooth: true, allDesks: true, loungeX: LOUNGE_X,
     setup() {}, drawRoom, props, drawDesk, drawChar, overlay, plan, pickDesk,
     obstacles: () => boundaries.map((b) => [b - 4, WALL_TOP, b + 4, WALL_BOTTOM]),
-    logoSpot: [CW / 2 - 70, 2, 140, 22],
+    logoSpot: [CW - 2.8 * T, 2, 2.2 * T, 15],
   });
 })();
