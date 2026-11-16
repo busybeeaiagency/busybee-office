@@ -264,6 +264,12 @@
   body.noanim #cards { margin-top:0; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); }
   .card { position:relative; }
   .card canvas.desk { position:static; inset:auto; display:block; width:calc(100% + 22px); height:auto; aspect-ratio:46 / 36; margin:-9px -11px 8px; border-radius:8px 8px 0 0; background:#2a2d3d; }
+  /* the agent's own kanban counts, inside its card: collapsed to one quiet line in the card row,
+     open only in the detail panel, so the card height stays sane either way */
+  #cards .kb { margin-top:6px; font-size:11px; }
+  .kb summary { cursor:pointer; color:var(--muted); }
+  .kb .kbg { margin:4px 0 0; color:var(--muted); }
+  .kb .kbr { display:flex; gap:6px; } .kb code { font-size:10.5px; color:var(--link); } .kb .kbt { color:var(--text); }
   #view { position:absolute; inset:0; transform-origin:0 0; will-change:transform; }
   #stage.zoomed { cursor:grab; }
   #stage.zoomed.panning { cursor:grabbing; }
@@ -372,6 +378,18 @@
     #detail.sheet { max-height: 58vh; }
     #detail.sheet .erracts { position: sticky; bottom: 0; }   /* the buttons stay reachable while the card scrolls */
   }
+  /* the result of an action the user asked for must not hide in the header count line */
+  #toast { position: fixed; right: 14px; bottom: 74px; z-index: 60; max-width: min(430px, 90vw);
+    background: #151827; border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px;
+    padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: #e8eaf2; cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); display: none; }
+  #toast.show { display: block; }
+  #toast.ok { border-left-color: #4caf7d; }
+  #toast.warn { border-left-color: #d8a13a; }
+  #toast.err { border-left-color: #e0574f; }
+  #toast b { display: block; font-size: 13px; margin-bottom: 3px; }
+  #toast .d { color: #9ab3c7; word-break: break-word; }
+  @media (max-width: 700px) { #toast { left: 12px; right: 12px; bottom: 66px; max-width: none; } }
 </style>
 </head>
 <body>
@@ -407,6 +425,7 @@
   <dialog id="ghdlg"></dialog>
   <dialog id="qdlg"></dialog>
   <dialog id="answer"><div class="head"><b></b><a target="_blank" rel="noopener"></a><button type="button" class="x"></button></div><iframe title="Paperclip"></iframe><div class="note"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
   <footer>
     <span id="hint"></span>
     <span><a href="https://github.com/caglarutkuguler/cubicle" target="_blank" rel="noopener">Cubicle</a> · MIT</span>
@@ -531,6 +550,12 @@
       prevAttempts: (n) => `previous attempts (${n})`, prevSteps: (n) => `${n} steps`,
       // the three kanban writes, the confirmation that gates them, and what each answer means
       actRestart: 'Restart', actApprove: 'Approve', actDismiss: 'Dismiss', actReject: 'Reject',
+      // the card's own kanban list (read from the board, never written) and the one dispatcher nudge
+      kanbanTitle: 'Cards on the kanban for this agent', kanbanLoading: 'kanban: loading…',
+      kanbanNone: 'no tasks on the board', kanbanMore: (n) => `+${n} more`,
+      dispatchQueue: 'Check queue', dispatchTitle: 'Run one dispatcher pass now so idle agents pick up ready tasks',
+      dispatchBusy: 'checking…', dispatchFail: 'the office backend could not reach the dispatcher',
+      dispatchDone: 'Dispatcher pass', dispatchDeferred: 'deferred',
       // the review column is Bart's own queue: the banner says whose turn it is, in his words
       awaitingDecision: 'awaiting YOUR decision', reviewTitle: (n) => `${n}: awaiting YOUR decision`,
       actWaiting: (d) => `waiting ${d}`,
@@ -656,6 +681,12 @@
       runSecond: 'sn', runMinute: 'dk', runHour: 'sa',
       prevAttempts: (n) => `önceki denemeler (${n})`, prevSteps: (n) => `${n} adım`,
       actRestart: 'Yeniden başlat', actApprove: 'Onayla', actDismiss: 'Yoksay', actReject: 'Reddet',
+      // kartın kendi kanban listesi (panodan okunur, yazılmaz) ve tek yönetici hamlesi
+      kanbanTitle: 'Bu ajan için kanbandaki kartlar', kanbanLoading: 'kanban: yükleniyor…',
+      kanbanNone: 'panoda görev yok', kanbanMore: (n) => `+${n} fazla`,
+      dispatchQueue: 'Kuyruğu kontrol et', dispatchTitle: 'Boştaki ajanlar hazır görevleri alsın diye şimdi tek bir yönetici turu çalıştır',
+      dispatchBusy: 'kontrol ediliyor…', dispatchFail: 'ofis arkaucu yöneticiye ulaşamadı',
+      dispatchDone: 'Yönetici turu', dispatchDeferred: 'ertelendi',
       // inceleme süturu Bart'ın kendi sırası: afiş kimin beklediğini onun sözleriyle söyler
       awaitingDecision: 'SENİN kararını bekliyor', reviewTitle: (n) => `${n}: SENİN kararını bekliyor`,
       actWaiting: (d) => `bekliyor, ${d}`,
@@ -770,6 +801,13 @@
       lookServer: 'Auf dem Rechner gespeichert, auf dem Cubicle läuft, damit jeder Bildschirm dieses Büros es zeigt.', lookLocal: 'In diesem Browser gespeichert. Exportieren, um es in einem anderen zu nutzen.',
       lookDenied: 'Nur ein Browser auf dem Rechner, auf dem Cubicle läuft, kann das Aussehen ändern. Vorerst in diesem Browser gespeichert.',
       needsYouTitle: (n) => `${n} braucht dich`,
+      // das eigene Kanban eines Agenten (nur gelesen, nie geschrieben) und der Dispatcher-Durchlauf
+      kanbanTitle: 'Karten auf dem Kanban dieses Agenten', kanbanLoading: 'Kanban: lädt…',
+      kanbanNone: 'keine Aufgaben auf dem Board', kanbanMore: (n) => `+${n} mehr`,
+      dispatchQueue: 'Warteschlange prüfen',
+      dispatchTitle: 'Jetzt einen Dispatcher-Durchlauf starten, damit freie Agenten bereite Aufgaben übernehmen',
+      dispatchBusy: 'prüfe…', dispatchFail: 'Das Büro-Backend hat den Dispatcher nicht erreicht',
+      dispatchDone: 'Dispatcher-Durchlauf', dispatchDeferred: 'zurückgestellt',
       // Die Büro-Operator-Aktionen (spec 2): die Knöpfe im Banner, die addierenden Zähler, die
       // Zeile zum laufenden Versuch. Jeder Lesefall fällt auf Englisch zurück, damit nie undefined steht.
       summaryMore: (k, e) => `${k} warten · ${e} mit Fehler`,
@@ -896,6 +934,13 @@
       lookServer: 'Guardado en el equipo donde corre Cubicle, así cada pantalla de esta oficina lo muestra.', lookLocal: 'Guardado en este navegador. Expórtalo para usarlo en otro.',
       lookDenied: 'Solo un navegador en el equipo donde corre Cubicle puede cambiar la apariencia. Guardado en este navegador por ahora.',
       needsYouTitle: (n) => `${n} te necesita`,
+      // el kanban de este agente (solo lectura, nunca escritura) y la pasada del dispatcher
+      kanbanTitle: 'Tarjetas en el kanban de este agente', kanbanLoading: 'kanban: cargando…',
+      kanbanNone: 'no hay tareas en el tablero', kanbanMore: (n) => `+${n} más`,
+      dispatchQueue: 'Comprobar la cola',
+      dispatchTitle: 'Ejecuta ahora una pasada del dispatcher para que los agentes libres tomen las tareas listas',
+      dispatchBusy: 'comprobando…', dispatchFail: 'el backend de la oficina no pudo contactar con el dispatcher',
+      dispatchDone: 'Pasada del dispatcher', dispatchDeferred: 'aplazada',
       // Las acciones del operador de la oficina (spec 2): los botones del cartel, los contadores que suman,
       // la línea del intento en curso. Cada lectura cae en el inglés, así que nunca aparece un undefined.
       summaryMore: (k, e) => `${k} en espera · ${e} en error`,
@@ -1022,6 +1067,13 @@
       lookServer: 'Enregistré sur la machine où tourne Cubicle : chaque écran de ce bureau l’affiche.', lookLocal: 'Enregistré dans ce navigateur. Exportez-le pour l’utiliser ailleurs.',
       lookDenied: 'Seul un navigateur sur la machine où tourne Cubicle peut changer l’apparence. Enregistré dans ce navigateur pour l’instant.',
       needsYouTitle: (n) => `${n} a besoin de vous`,
+      // le kanban de cet agent (lecture seule, jamais d’écriture) et la passe du dispatcher
+      kanbanTitle: 'Les cartes du kanban de cet agent', kanbanLoading: 'kanban : chargement…',
+      kanbanNone: 'aucune tâche sur le tableau', kanbanMore: (n) => `+${n} en plus`,
+      dispatchQueue: 'Vérifier la file',
+      dispatchTitle: 'Lancer maintenant une passe du dispatcher pour que les agents libres prennent les tâches prêtes',
+      dispatchBusy: 'vérification…', dispatchFail: 'le backend du bureau n’a pas pu joindre le dispatcher',
+      dispatchDone: 'Passe du dispatcher', dispatchDeferred: 'reportée',
       // Les actions de l’opérateur du bureau (spec 2) : les boutons de la bannière, les compteurs qui
       // additionnent, la ligne de la tentative en cours. Chaque lecture retombe sur l’anglais, jamais un undefined.
       summaryMore: (k, e) => `${k} en attente · ${e} en erreur`,
@@ -1148,6 +1200,13 @@
       lookServer: '保存在运行 Cubicle 的电脑上，这个办公室的每块屏幕都会显示。', lookLocal: '保存在此浏览器中。导出后可在其他浏览器使用。',
       lookDenied: '只有运行 Cubicle 的电脑上的浏览器才能更改外观。暂时保存在此浏览器中。',
       needsYouTitle: (n) => `${n} 需要你`,
+      // 该代理自己的看板（只读，绝不写入）与一次调度轮
+      kanbanTitle: '该代理在看板上的卡片', kanbanLoading: '看板：加载中…',
+      kanbanNone: '看板上没有任务', kanbanMore: (n) => `+${n} 更多`,
+      dispatchQueue: '检查队列',
+      dispatchTitle: '立即运行一次调度轮，让空闲代理领取就绪任务',
+      dispatchBusy: '检查中…', dispatchFail: '办公后端无法连接调度器',
+      dispatchDone: '调度轮结果', dispatchDeferred: '已延后',
       // 办公室操作员动作（spec 2）：横幅上的按钮、加总的计数、当前尝试的那一行。
       // 每次读取都回退到英文，所以绝不会显示 undefined。
       summaryMore: (k, e) => `${k} 等待中 · ${e} 出错`,
@@ -1274,6 +1333,13 @@
       lookServer: 'يُحفظ على الجهاز الذي يشغّل Cubicle، فتعرضه كل شاشات هذا المكتب.', lookLocal: 'يُحفظ في هذا المتصفح. صدّره لاستخدامه في متصفح آخر.',
       lookDenied: 'لا يغيّر المظهر إلا متصفح على الجهاز الذي يشغّل Cubicle. حُفظ في هذا المتصفح مؤقتًا.',
       needsYouTitle: (n) => `${n} يحتاجك`,
+      // لوح هذا الوكيل الخاص (قراءة فقط، لا كتابة) وجولة المُوزِّع
+      kanbanTitle: 'بطاقات هذا الوكيل على اللوح', kanbanLoading: 'اللوح: جارٍ التحميل…',
+      kanbanNone: 'لا مهام على اللوح', kanbanMore: (n) => `+${n} أخرى`,
+      dispatchQueue: 'افحص الطابور',
+      dispatchTitle: 'شغّل جولة واحدة للمُوزِّع الآن ليبدأ الوكلاء المتفرغون المهام الجاهزة',
+      dispatchBusy: 'جارٍ الفحص…', dispatchFail: 'لم يستطع خادم المكتب الوصول إلى المُوزِّع',
+      dispatchDone: 'جولة المُوزِّع', dispatchDeferred: 'مُرجَّأة',
       // إجراءات مشغّل المكتب (spec 2): أزرار اللافتة، والعدّادات التي تجمع، وسطر المحاولة الجارية.
       // كل قراءة ترجع إلى الإنجليزية، فلا يظهر undefined أبدًا.
       summaryMore: (k, e) => `${k} في الانتظار · ${e} خطأ`,
@@ -1431,10 +1497,17 @@
     const pc = pcLink() && company && !DEMO && !framed;
     const kpi = DEMO || (paperclipUrl && company) || kpiLocal;
     const html = (kpi ? `<button type="button" class="navb" data-nav="kpi" title="${esc(L.kpiTitle)}">📊 KPI</button>` : '')
-      + (pc ? `<a class="navb" href="${esc(pcLink())}/${esc(company.issuePrefix)}/dashboard" target="cubicle-paperclip" rel="noopener" title="${esc(L.openPaperclip)}">Paperclip ↗</a>` : '');
+      + (pc ? `<a class="navb" href="${esc(pcLink())}/${esc(company.issuePrefix)}/dashboard" target="cubicle-paperclip" rel="noopener" title="${esc(L.openPaperclip)}">Paperclip ↗</a>` : '')
+      // the dispatcher nudge, only when the office backend says it can reach the dashboard (a stock
+      // Cubicle has no /api/office/dispatch, so the button simply never appears there)
+      + ((officeCaps && officeCaps.dispatch && officeCaps.dispatch.available)
+        ? `<button type="button" class="navb" data-nav="dispatch" title="${esc(L.dispatchTitle || EN.dispatchTitle)}">📥 ${esc(L.dispatchQueue || EN.dispatchQueue)}</button>` : '');
     if (navEl.innerHTML !== html) navEl.innerHTML = html;
   }
-  navEl.addEventListener('click', (e) => { const b = e.target.closest('[data-nav="kpi"]'); if (b) openKpi(); });
+  navEl.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nav="kpi"]'); if (b) { openKpi(); return; }
+    const q = e.target.closest('[data-nav="dispatch"]'); if (q) checkQueue(q);
+  });
 
   // Links from elsewhere (e.g. a Telegram message): ?agent=<id> selects that agent, ?kpi opens the board.
   let linked = false;
@@ -2503,6 +2576,14 @@
         // The server can name the office's theme (busybee-office does); a URL param or a saved
         // choice in this browser still wins.
         if (cfg.theme && !params.get('theme') && !hasStoredTheme) settings.theme = cfg.theme;
+        // Publish the deployment's own choice as well: applySettings resolves the office through
+        // this, so a settings chain that painted before /config.json answered cannot be left
+        // showing the wrong office. A ?theme= URL param clears it, so the param still wins.
+        window.__cubicleServerTheme = params.get('theme') ? '' : (cfg.theme || '');
+        // A config that arrives after the theme chain's 1200 ms cap has already painted the wrong
+        // office: re-apply the decision (applySettings re-sizes the canvas, which re-fits the stage).
+        // A saved browser choice or a ?theme= param was never overridden above, so it still wins.
+        if (window.__cubicleApplySettings && theme.id !== (settings.theme || 'pixel')) { try { window.__cubicleApplySettings(); } catch (_) {} }
         if (cfg.replay) replayClock = { ...cfg.replay, loadedAt: Date.now() };
         const list = cfg.sources || [cfg.source === 'feed'
           ? { kind: 'feed', label: cfg.label, path: '/api/feed' }
@@ -2524,6 +2605,9 @@
       b.innerHTML = L.demo; b.style.display = 'block';
     }
     if (DEMO) providers = [demoProvider()];
+    // The theme decision is known now whatever happened above (config ok, config failed, demo), so
+    // the settings chain waiting on cfgSettled can finally start. Settled once, on every path.
+    cfgSettledOnce();
     await loadLooks();
     if (!panel.hidden) renderSettings();
     poll();
@@ -2551,16 +2635,85 @@
   async function fetchOfficeCaps() {
     try {
       const r = await fetch('/api/office/actions', { cache: 'no-store' });
-      if (!r.ok) return { writable: false, reason: null, actions: [] };
+      if (!r.ok) return { writable: false, reason: null, actions: [], dispatch: null };
       const j = await r.json();
-      return { writable: !!j.writable, reason: j.reason || null, actions: Array.isArray(j.actions) ? j.actions : [] };
-    } catch (_) { return officeCaps || { writable: false, reason: null, actions: [] }; }
+      // `dispatch` travels with the caps: the Check queue button is painted only when the office
+      // backend says it can reach the dispatcher, and a stock Cubicle (no such route) stays dark.
+      return { writable: !!j.writable, reason: j.reason || null,
+               actions: Array.isArray(j.actions) ? j.actions : [],
+               dispatch: (j.dispatch && typeof j.dispatch === 'object') ? j.dispatch : null };
+    } catch (_) { return officeCaps || { writable: false, reason: null, actions: [], dispatch: null }; }
   }
 
   // The outcome of an operator action, shown in the header line. poll() keeps it in front for a few
   // seconds, otherwise the next answer four seconds later buries "slow down" before it is readable.
   let statusNote = '', statusNoteUntil = 0;
   function setStatusNote(text, secs = 8) { statusNote = String(text); statusNoteUntil = Date.now() + secs * 1000; statusEl.textContent = statusNote; }
+
+  // …and the same outcome as a card in the corner, because on the TV layout the header line is 13 px
+  // muted text wrapped under the title: pressing 📥 three times looked like nothing happened. The
+  // counter line is a status; an answer to something the operator just asked for needs its own box.
+  const toastEl = document.getElementById('toast');
+  let toastTimer = 0;
+  function showToast(kind, title, lines) {
+    if (!toastEl) return;
+    clearTimeout(toastTimer);                                        // a new answer replaces the last one
+    toastEl.className = `show ${kind}`;                              // show + ok | warn | err
+    toastEl.innerHTML = `<b>${esc(title)}</b>` +
+      (Array.isArray(lines) ? lines : [lines]).filter((s) => s).map((s) => `<div class="d">${esc(s)}</div>`).join('');
+    toastTimer = setTimeout(() => { toastEl.className = ''; }, kind === 'ok' ? 14000 : 20000);
+  }
+  if (toastEl) toastEl.addEventListener('click', () => { clearTimeout(toastTimer); toastEl.className = ''; });
+
+  // "Check queue": one dispatcher pass, the same door the Hermes dashboard uses. The office never
+  // claims a card itself — it asks the dashboard for a single pass so idle agents pick up ready
+  // work. Nothing secret travels here: the dashboard password stays server-side, only a bare {} goes.
+  async function checkQueue(btn) {
+    if (!btn || btn.disabled) return;                      // one nudge at a time
+    const was = btn.textContent;
+    btn.disabled = true; btn.textContent = `📥 ${L.dispatchBusy || EN.dispatchBusy}`;
+    // The backend already names the reason (memory pressure, host cap, per-profile cap) in `message`;
+    // the deferred cards go underneath it, id first, so an operator can open the card it is about.
+    const deferredLine = (r) => {
+      const n = Number(r && r.deferred_n) || 0;
+      if (n <= 0) return '';
+      const list = (Array.isArray(r.deferred) ? r.deferred : [])
+        .map((x) => (Array.isArray(x) ? [x[0], x[1]] : [x, ''])).filter((x) => x[0])
+        .slice(0, 4).map((x) => `${x[0]} (${x[1]})`.replace(/\s*\(\s*\)$/, ''));
+      return `${(L.dispatchDeferred || EN.dispatchDeferred)}: ${list.join(', ') || n}`;
+    };
+    try {
+      const resp = await fetch('/api/office/dispatch', { method: 'POST', cache: 'no-store',
+        headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: '{}' });
+      let r = null;
+      try { r = await resp.json(); } catch (_) { r = null; }   // a proxy or a stock Cubicle answers HTML
+      const ids = (Array.isArray(r && r.spawned) ? r.spawned : []).map((x) => (x && x.task) || '').filter(Boolean);
+      const dl = deferredLine(r);
+      if (r && r.ok) {
+        setStatusNote(`📥 ${r.message || ''}${(r.spawned_n && ids.slice(0, 3).length) ? ` — ${ids.slice(0, 3).join(', ')}` : ''}`, 15);
+        showToast('ok', `📥 ${L.dispatchDone || EN.dispatchDone}`,
+          [r.message || '', ...(r.spawned_n ? [ids.slice(0, 4).join(', ')] : []), dl].filter((s) => s && String(s).trim()));
+      } else {
+        const status = Number(resp.status) || 0;
+        const code = String((r && (r.error || r.code)) || '');
+        // "not yet" (429 rate-limited, a locked queue, the dashboard briefly away) is a warning;
+        // anything else we cannot name — a missing x-cubicle header, an error page where JSON
+        // should be — is an error. server/office.py + server/dispatch.py are the code list.
+        const kind = (status === 429 || status === 502 || status === 503 || /defer|lock|throttl|slow|unavail|offline|rate_limited|creds|not_writable/i.test(code)) ? 'warn' : 'err';
+        const line = (r && (r.message || r.error)) || (L.dispatchFail || EN.dispatchFail);
+        setStatusNote(`⚠ ${line}`);
+        showToast(kind, `⚠ ${L.dispatchDone || EN.dispatchDone}`, [line, dl]);
+      }
+    } catch (_) {
+      setStatusNote(`⚠ ${L.dispatchFail || EN.dispatchFail}`);
+      showToast('err', `⚠ ${L.dispatchDone || EN.dispatchDone}`, [L.dispatchFail || EN.dispatchFail]);
+    }
+    finally {
+      btn.disabled = false; btn.textContent = was;
+      renderNav();                                          // rebuild the nav from the caps, as always
+      poll();                                               // and show the new runs inside one cycle
+    }
+  }
 
   async function poll() {
     // Asked in the same breath as the feed, so a poll is still one round trip. Only worth asking
@@ -2569,6 +2722,10 @@
       ? fetchOfficeCaps() : Promise.resolve(officeCaps || { writable: false, reason: null, actions: [] });
     const [caps, results] = await Promise.all([capsPromise, Promise.allSettled(providers.map((p) => p.load()))]);
     officeCaps = caps; window.__officeCaps = caps;
+    renderNav();                        // the 📥 button appears the moment the capability is known
+    // The per-agent board list lives on the cards, so it rides along with the feed poll — asked at
+    // most every 12 s (the server caches the answer for 5 s), and never twice at once.
+    if (providers.some((p) => p.kind === 'feed') && Date.now() - kanbanAt > 12000 && !kanbanBusy) { try { fetchKanban(); } catch (_) {} }
     const agents = [], issues = [], labels = [], failed = [], notes = [], dismissedTasks = [];
     results.forEach((r, i) => {
       if (r.status === 'rejected') { failed.push(i); return; }
@@ -2664,6 +2821,9 @@
   function sync(agents, issues, dismissedTasks = []) {
     const shift = humanOn() ? 1 : 0;      // the human sits at the first desk
     layoutFor(agents.length + shift);
+    // the office is sized now (layoutFor ends in resizeCanvas → fitLayout), so this is the one
+    // moment a hand-made camera can be put back on top of the final stage without fighting the fit
+    if (!camRestored) { camRestored = true; restoreCam(); }
     const sorted = [...agents].sort((a, b) => ((a._src || 0) - (b._src || 0)) || String(a.createdAt).localeCompare(String(b.createdAt)));
     const seen = new Set();
     sorted.forEach((a, idx) => {
@@ -3334,6 +3494,59 @@
     c.next = now + LINE_SECS;
   }
 
+  // ---------- each agent's own cards on the kanban (GET /api/office/kanban, read-only) ----------
+  // The board is a second door onto the same kanban.db the feed comes from, cached server-side for
+  // 5 s, so the page asks for it at most once every 12 s — the 4 s feed poll stays exactly one round
+  // trip. Nothing here is ever written: the office writes the board only through its own action routes.
+  let kanbanBoard = null, kanbanAt = 0, kanbanBusy = false, kanbanGone = false;
+  async function fetchKanban() {
+    if (kanbanBusy) return;
+    kanbanBusy = true;
+    try {
+      const r = await fetch('/api/office/kanban', { cache: 'no-store' });
+      if (!r.ok) { kanbanGone = !kanbanBoard; return; }      // keep the last good board
+      const j = await r.json();
+      if (!j || !j.ok) { kanbanGone = !kanbanBoard; return; }
+      kanbanBoard = j; kanbanGone = false; kanbanAt = Date.now();
+      renderCards();                                        // the list changed; the office did not
+    } catch (_) { kanbanGone = !kanbanBoard; /* offline, or a server without the route: no board line */ }
+    finally { kanbanBusy = false; }
+  }
+  // Which board column belongs to this sprite: the fleet's own keys, never a hardcoded name. A feed
+  // id is namespaced ("/api/feed/0#coder"), and a roster id can be a substring of another
+  // ("coder" ⊂ "orchestrator"), so the longest key mentioned anywhere in the sprite wins.
+  function kanbanKeyFor(s) {
+    if (!kanbanBoard || !kanbanBoard.agents) return '';
+    const hay = [s && s.realName, s && s.id, s && s.name, s && s.role].filter(Boolean).join(' ').toLowerCase();
+    const keys = Object.keys(kanbanBoard.agents).sort((a, b) => b.length - a.length);
+    for (const k of keys) if (k && hay.indexOf(k.toLowerCase()) >= 0) return k;
+    return '';
+  }
+  const KB_MARK = { running: '🟢', blocked: '🔴', review: '🟡', ready: '🔵', todo: '⬜', done: '✅' };
+  const KB_ORDER = ['running', 'blocked', 'review', 'ready', 'todo', 'done'];
+  // the feed re-renders the cards every cycle, so an opened kanban list must be remembered here —
+  // the same trick the step/attempt lists use (openSteps), or the drawer would snap shut on its own
+  const kbOpen = new Set();
+  function kanbanBlock(s, panel) {
+    // a card renderer must never break the frame loop, so anything odd here renders as nothing
+    try {
+      if (kanbanGone) return '';                             // a server with no board route: stay as before
+      if (!kanbanBoard) return `<div class="kb">${esc(L.kanbanLoading || EN.kanbanLoading)}</div>`;
+      const key = kanbanKeyFor(s);
+      if (!key) return '';
+      const ent = kanbanBoard.agents[key] || {};
+      const c = ent.counts || {}, tasks = ent.tasks || {};
+      if (!Number(c.total)) return `<div class="kb" style="color:var(--muted)">${esc(L.kanbanNone || EN.kanbanNone)}</div>`;
+      const head = KB_ORDER.filter((k) => Number(c[k])).map((k) => `${KB_MARK[k]} ${esc(c[k])} ${esc(k)}`).join(' · ');
+      const body = KB_ORDER.filter((k) => Array.isArray(tasks[k]) && tasks[k].length).map((k) => {
+        const rows = tasks[k].slice(0, 6).map((t) => `<div class="kbr"><code>${esc(t && t.id || '')}</code><span class="kbt">${esc(t && t.title || '')}</span></div>`).join('');
+        const more = Number(c[k]) > 6 ? `<div class="kbr" style="color:var(--muted)">${esc((L.kanbanMore || EN.kanbanMore)(Number(c[k]) - 6))}</div>` : '';
+        return `<div class="kbg">${KB_MARK[k]} ${esc(k)} · ${esc(c[k])}</div>${rows}${more}`;
+      }).join('');
+      return `<details class="kb" data-kb="${esc(s.id)}"${(panel || kbOpen.has(s.id)) ? ' open' : ''}><summary title="${esc(L.kanbanTitle || EN.kanbanTitle)}">${head || esc(L.kanbanNone || EN.kanbanNone)}</summary>${body}</details>`;
+    } catch (_) { return ''; }
+  }
+
   // ---------- the last steps, for cards and the detail panel ----------
   const openSteps = new Set();
   function ago(ms) {
@@ -3353,26 +3566,68 @@
     return ans + `<details class="steps" data-id="${esc(s.id)}"${openSteps.has(s.id) ? ' open' : ''}><summary>${esc(L.lastSteps)} (${s.recent.length})</summary><ol>${items}</ol></details>`;
   }
   cardsEl.addEventListener('toggle', (e) => {
-    const d = e.target; if (!d.dataset || !d.dataset.id) return;
+    const d = e.target;
+    // The kanban list keeps its own open state: the cards are rebuilt every feed cycle, and it
+    // shares the card markup with the step lists without owning openSteps.
+    if (d.classList && d.classList.contains('kb')) {
+      const k = d.dataset && d.dataset.kb;
+      if (k) { if (d.open) kbOpen.add(k); else kbOpen.delete(k); }
+      return;
+    }
+    if (!d.dataset || !d.dataset.id) return;
+    // Only the step/attempt lists own openSteps. A card can grow another <details> (the kanban
+    // counts carry the same agent id in the same markup) and must not impersonate them.
+    if (!d.classList.contains('steps') && !d.classList.contains('prev')) return;
     if (d.open) openSteps.add(d.dataset.id); else openSteps.delete(d.dataset.id);
   }, true);
 
   // ---------- zoom, pan, and following one agent ----------
   const viewEl = document.getElementById('view'), detailEl = document.getElementById('detail'), zoomUi = document.getElementById('zoomui');
   const cam = { z: 1, x: 0, y: 0, follow: null, sel: null };   // follow: the camera tracks; sel: the panel
+  // the camera the operator made by hand, kept across the page's own reloads (see restoreCam)
+  const CAM_KEY = 'cubicle.cam';
+  let camRestored = false, camSaveTimer = null;
+  const camAtFit = () => cam.z === 1 && cam.x === 0 && cam.y === 0;
+  function queueSaveCam() {
+    clearTimeout(camSaveTimer);                                // clampCam runs on zoom, pan and resize
+    camSaveTimer = setTimeout(() => {                          // but never per animation frame
+      try {
+        if (camAtFit()) localStorage.removeItem(CAM_KEY);      // a fit view needs no restoring
+        else localStorage.setItem(CAM_KEY, JSON.stringify({ z: cam.z, x: cam.x, y: cam.y, at: Date.now(), theme: (theme && theme.id) || 'pixel' }));
+      } catch (_) {}
+    }, 800);
+  }
+  function restoreCam() {
+    // The office reloads itself after a server update and after an operator action, and a reload
+    // must not silently crop the view the operator is looking at — but opening the page again later
+    // must always start on the full-office fit, so a stored camera older than five minutes is dropped.
+    try {
+      const j = JSON.parse(localStorage.getItem(CAM_KEY) || 'null');
+      if (!j || !Number.isFinite(j.z) || j.z <= 1) return false;
+      if ((j.theme || 'pixel') !== ((theme && theme.id) || 'pixel')) return false;   // another office, other numbers
+      if (!Number.isFinite(j.at) || Date.now() - j.at > 5 * 60 * 1000) return false;
+      cam.z = Math.max(1, Math.min(4, j.z)); cam.x = j.x || 0; cam.y = j.y || 0;
+      clampCam(); return true;
+    } catch (_) { return false; }
+  }
   function clampCam() {
     const w = stageEl.clientWidth, h = stageEl.clientHeight;
     cam.z = Math.max(1, Math.min(4, cam.z));
     cam.x = Math.min(0, Math.max(w - w * cam.z, cam.x)); cam.y = Math.min(0, Math.max(h - h * cam.z, cam.y));
     viewEl.style.transform = cam.z === 1 ? '' : `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})`;
     stageEl.classList.toggle('zoomed', cam.z > 1);
+    queueSaveCam();                       // zoom, pan and resize all end here: remember the view
   }
   function zoomAtPoint(z, px, py) {
     cam.auto = false;                                  // zoomed by hand: stays until changed by hand
     const nz = Math.max(1, Math.min(4, z));
     cam.x = px - (px - cam.x) * (nz / cam.z); cam.y = py - (py - cam.y) * (nz / cam.z); cam.z = nz; clampCam();
   }
-  function resetCam() { cam.z = 1; cam.x = cam.y = 0; cam.follow = cam.sel = null; cam.auto = false; detailEl.hidden = true; clampCam(); }
+  function resetCam() {
+    cam.z = 1; cam.x = cam.y = 0; cam.follow = cam.sel = null; cam.auto = false; detailEl.hidden = true; clampCam();
+    // Fit / Escape / double-click: the operator asked for the whole office back, so forget the view
+    try { localStorage.removeItem(CAM_KEY); } catch (_) {}
+  }
   function officePoint(clientX, clientY) {
     const r = stageEl.getBoundingClientRect(), k = cv.clientWidth / CW;
     return [((clientX - r.left - cam.x) / cam.z) / k, ((clientY - r.top - cam.y) / cam.z) / k];
@@ -3575,7 +3830,7 @@
     const nick = s.realName && s.realName !== s.name ? ` <span class="real">(${esc(s.realName)})</span>` : '';
     return `<div class="top"><span class="sw" style="background:${esc(s.shirt)}"></span><b class="pick" data-id="${id}">${esc(s.name)}</b>${nick}${panel ? '' : `<button type="button" class="edit" data-id="${id}" title="${esc(L.looksName)}" aria-label="${esc(L.looksName)}">✎</button>`}</div>
         <div class="role">${esc(s.role)}${spendHtml(s)}</div>
-        <div class="st"><span class="pill p-${esc(s.status)}">${esc(L[s.status] || s.status)}</span>${taskHtml}${etaHtml(s)}${reply}</div>${runLineHtml(s)}${note}${errorBox(s)}${stepsHtml(s)}${prevHtml(s)}${acts}${away}`;
+        <div class="st"><span class="pill p-${esc(s.status)}">${esc(L[s.status] || s.status)}</span>${taskHtml}${etaHtml(s)}${reply}</div>${runLineHtml(s)}${note}${errorBox(s)}${stepsHtml(s)}${prevHtml(s)}${acts}${away}${kanbanBlock(s, panel)}`;
   }
   // The panel belongs to the selected agent (cam.sel), not to the camera: zooming, panning or the
   // wheel stop the camera from following but keep the panel next to its agent. It is placed right,
@@ -4013,6 +4268,12 @@
   };
   function onCanvas(c, fn) { const main = g; g = c.g; try { fn(); } finally { g = main; } }
   let theme = themes.pixel;
+  // Which office to paint is decided by /config.json, but the theme chain used to run without
+  // waiting for it: measured at 4 loads out of 5 the chain won and rendered the stock pixel office
+  // instead of the deployment's own theme (aspect 1.69 vs 3.15, which is also why the wrong render
+  // looks ~2x cropped with its labels and ticker off-frame). The chain waits on this promise.
+  let settleCfg; const cfgSettled = new Promise((res) => { settleCfg = res; });
+  const cfgSettledOnce = () => { try { settleCfg(); } catch (_) {} };
   let themeOpts = {};
   window.CubicleThemes = { register(t) { themes[t.id] = t; }, T };
 
@@ -4613,12 +4874,27 @@
   }
 
   async function applySettings() {
+    // A wall office names its own theme. That outranks the page's own default and any theme the
+    // page auto-saved here earlier — measured at 4 of 5 loads the old code painted the stock pixel
+    // office because the chain resolved settings.theme before /config.json had answered. A ?theme=
+    // URL param cleared __cubicleServerTheme in the boot leg, so an explicit link still wins.
+    if (window.__cubicleServerTheme) settings.theme = window.__cubicleServerTheme;
     const entry = CATALOG.find((c) => c.id === settings.theme) || CATALOG[0];
     themeOpts = {};
     for (const o of entry.options) themeOpts[o.key] = o.values.some((v) => v[0] === settings[o.key]) ? settings[o.key] : o.values[0][0];
     theme = await loadTheme(entry.id);
     if (theme.setup) theme.setup(themeOpts);
-    resizeCanvas();
+    // The floor plan belongs to the theme, so applying a theme means re-running the layout: a theme
+    // that replaces the plan (busybee's five-room panorama, CW 656 against the stock 352) also sets
+    // the canvas size, and layoutFor ends in resizeCanvas. Calling resizeCanvas here instead left
+    // whatever CW/CH the stock layout had picked: measured, when the feed answered before this chain
+    // the office was drawn in the stock 352x208 canvas — the right theme, the wrong geometry, which
+    // is the ~2x-cropped render with the labels clipped and the ticker off-frame — and it stayed that
+    // way until a window resize (the resize handler is the only other caller of layoutFor).
+    layoutFor(AGENTS || 0, true);
+    // The office's own theme decision can land after this chain has already painted once; the boot
+    // leg compares theme.id against its decision and re-runs this through the published handle.
+    window.__cubicleApplySettings = applySettings;
     renderSettings();
     if (!animOn()) renderCards();          // desk cards are drawn with the theme
   }
@@ -4800,10 +5076,16 @@
   const G = { ...GH_TEXT.en, ...(GH_TEXT[lang] || {}) };
   const ghBtn = document.getElementById('ghq'), ghDlg = document.getElementById('ghdlg');
   let ghState = null;
+  let ghTimer = null;
   async function pollGithub() {
     if (DEMO || EMBED) return;
     try {
       const r = await fetch('/api/cubicle/github', { cache: 'no-store' });
+      // A 404 here means the server has no GitHub feed at all (the office dashboard answers 404 for
+      // this route), and an unconditional 60 s timer re-asked a route that will never exist: 488
+      // "GET /api/cubicle/github 404" lines in one container lifetime on 2026-11-16. A missing
+      // route is permanent, so stop asking — same self-cancel shape as the attention poll below.
+      if (r.status === 404 || r.status === 405) { clearInterval(ghTimer); ghTimer = null; }
       ghState = r.ok ? await r.json() : null;
     } catch (_) { ghState = null; }
     renderGhBtn(); if (ghDlg.open) renderGh();
@@ -4842,7 +5124,7 @@
     const b = e.target.closest('[data-ghprep]');
     if (b) { b.disabled = true; await fetch('/api/cubicle/github', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: JSON.stringify({ prepare: b.dataset.ghprep }) }).catch(() => null); pollGithub(); }
   });
-  setInterval(pollGithub, 60000); setTimeout(pollGithub, 1500); setInterval(renderGhBtn, 5000);
+  ghTimer = setInterval(pollGithub, 60000); setTimeout(pollGithub, 1500); setInterval(renderGhBtn, 5000);
 
   const gear = document.getElementById('gear');
   const panel = document.getElementById('settings');
@@ -4981,7 +5263,10 @@
 
   if (params.has('debug')) window.CubicleDebug = { sprites, findPath, walkGrid, cam, select, openAnswer, renderCards, startChat, pets: () => pets, pokePet };   // for tests and theme authors
   resizeCanvas();
-  loadCatalog().then(applySettings).then(applyView);
+  // Wait for /config.json to say which office this is, but never for long: a slow or dead config
+  // must not leave the page unpainted, so the cap falls back to the old behaviour after 1200 ms.
+  Promise.race([cfgSettled, new Promise((r) => setTimeout(r, 1200))])
+    .then(loadCatalog).then(applySettings).then(applyView);
   init();
 })();
 </script>

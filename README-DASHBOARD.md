@@ -19,6 +19,8 @@ gets a brief "✓ done" celebration. A small vitals panel shows homelab health.
 | `server/` | Python 3.14 stdlib HTTP server (no dependencies): static hosting + JSON APIs |
 | `server/roster.py` | the fleet: agents, colours, home rooms, room keywords |
 | `server/feed.py` | `kanban.db` → cubicle feed (status mapping, room routing) |
+| `server/kanban_view.py` | `kanban.db` → the per-agent board view (read-only, capped, cached 5 s) |
+| `server/dispatch.py` | "Check queue": signs in to the Hermes dashboard and asks for one dispatcher pass |
 | `server/sources.py` | Mattermost, Beszel, Uptime Kuma, host stats, service probes (cached) |
 | `server/office.py` | the HTTP endpoints (map below) |
 | `public/themes/busybee.js` | the five-room mansion theme |
@@ -36,6 +38,9 @@ Everything is polled by the browser; the server never pushes.
 | `GET /api/feed/0` (alias `/api/feed`) | `/hermes/kanban.db` (SQLite, read-only) + latest `#off-topic` post | 4 s (page), feed rebuilt ≤1 s | none |
 | `GET /api/office/vitals` | host `/proc`, TCP/HTTP probes, Beszel, Uptime Kuma | 15 s server-side, 5 s page-side | server-side only |
 | `GET /api/office/chat` | Mattermost REST | ≤1 req/min server-side, 20 s page-side | bot login, server-side only |
+| `GET /api/office/kanban` (`?agent=<id>`) | `/hermes/kanban.db` (SQLite, **read-only**, `server/kanban_view.py`) | 12 s page-side, rebuilt ≤5 s server-side | none |
+| `GET` / `POST /api/office/dispatch` | the Hermes dashboard at `:9119`, signed in server-side (`server/dispatch.py`) | on click; POST limited to one pass per 15 s | `x-cubicle: 1` header on POST |
+| `GET /api/office/actions` | this server: the button contract (caps + `dispatch.available`) | on open, and after each action | none |
 | `GET /healthz` | this server | container healthcheck | none |
 | `GET /api/appearance`, `GET /api/cubicle/settings` | `{}` stubs (looks live in localStorage) | on open | none |
 
