@@ -1081,7 +1081,12 @@ esac
       assert.match(entry.id, /^[a-z0-9-]+$/); assert.ok(entry.name && entry.name.en, `${entry.id} has an English name`);
       const registered = [];
       let photos = 0;
-      const sandbox = { window: { CubicleThemes: { register: (t) => registered.push(t), T: 16, photoHead: (g, s) => { if (s.photoSrc) photos++; return !!s.photoSrc; } } }, Math, Date, String, Object, Array, Set, Map, Number };
+      // The sandbox is a browser-shaped world, not a bare one: our own busybee theme's overlay
+      // polls /api/office/vitals and keeps those polls on timers, so fetch + the timers have to
+      // exist here exactly as they do on the page. Stubbed, not real — the theme only needs the
+      // calls to resolve and the intervals to be registrable, and the process must still exit.
+      const sandbox = { window: { CubicleThemes: { register: (t) => registered.push(t), T: 16, photoHead: (g, s) => { if (s.photoSrc) photos++; return !!s.photoSrc; } } }, Math, Date, String, Object, Array, Set, Map, Number,
+        fetch: () => Promise.resolve({ ok: false, json: () => ({}) }), setTimeout: () => 0, setInterval: () => 0, clearInterval: () => {} };
       vm.createContext(sandbox);
       vm.runInContext(kit, sandbox);
       vm.runInContext(fs.readFileSync(path.join(dir, `${entry.id}.js`), 'utf8'), sandbox);
