@@ -201,8 +201,8 @@
     K.begin(c);
     // lounge furniture sorts with the characters (z = y it stands on)
     list.push({ z: 9.4 * T, f: () => K.sofa((LOUNGE_X + 1.0) * T, 9.4 * T, 4.4 * T, { color: '#6a3f8f' }) });
-    list.push({ z: 9.8 * T, f: () => K.table((LOUNGE_X + 4.4) * T, 9.8 * T, 2.8 * T, 1.2 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 3 }) });
-    list.push({ z: 9.8 * T, f: () => K.coffeeMachine(c, (LOUNGE_X + 7.1) * T, 9.8 * T) });
+    list.push({ z: 9.1 * T, f: () => K.table((LOUNGE_X + 4.4) * T, 9.1 * T, 2.8 * T, 1.2 * T, { top: '#5b4430', edge: '#4a3727', chairCount: 3 }) });
+    list.push({ z: 9.2 * T, f: () => K.coffeeMachine(c, (LOUNGE_X + 7.1) * T, 9.2 * T) });
     list.push({ z: 6.9 * T, f: () => K.waterCooler((LOUNGE_X + 0.5) * T, 6.9 * T) });
     list.push({ z: 6.0 * T, f: () => K.plant((LOUNGE_X + 0.4) * T, 6.0 * T, { size: 1.1 }) });
   }
@@ -254,8 +254,9 @@
     const host = vitals.host || {}, svcs = vitals.services || [];
     const up = svcs.filter((s) => s.up).length;
     const row = (y, text, color) => K.text(text, 8, y, { size: 8, color, font: 'ui-monospace, Menlo, Consolas, monospace' });
-    // The panels live in the strip along the bottom of the canvas (y 170..204), under both rugs and
-    // clear of every room, desk and label. Four rows at 8.5-unit pitch inside a 34-unit panel.
+    // The HUD lives in the corridor strip along the bottom of the canvas (y 170..204) — left of the
+    // lounge, where nothing else is drawn — because the lounge floor under it must stay visible.
+    // Four rows at 8.5-unit pitch inside a 34-unit panel.
     K.rr('rgba(6,8,12,.88)', 8, 170, 480, 34, 3);
     row(177, `HOMELAB  cpu ${host.cpu == null ? '--' : host.cpu + '%'}  mem ${host.mem == null ? '--' : host.mem + '%'}  disk ${host.disk == null ? '--' : host.disk + '%'}`, '#eef2fa');
     row(185.5, `services ${up}/${svcs.length} up   ${svcs.filter((s) => !s.up).map((s) => s.name).join(' ') || 'all green'}`, up === svcs.length ? '#7be3a0' : '#ffd23f');
@@ -263,17 +264,19 @@
     const post = chat && chat.posts && chat.posts[chat.posts.length - 1];
     if (post) row(202.5, `#off-topic ${post.user}: ${String(post.message).slice(0, 42)}`, '#8fd3ff');
 
-    // Mattermost presence: one dot per agent, left to right, green when online, plus the tally
+    // Mattermost presence: one dot per agent, left to right, green when online, plus the tally.
+    // It sits in the corridor right of the vitals panel (which ends at x 488) — parked at CW - 143
+    // it painted over the lounge table and the coffee machine, so the lounge read as an empty room.
     const presence = (chat && chat.presence) || {};
     const online = KEYS.filter((id) => (presence[AGENT_MM[id]] || 'offline') === 'online').length;
-    K.rr('rgba(6,8,12,.88)', CW - 143, 170, 135, 34, 3);
-    K.text('MM presence', CW - 137, 177, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
+    K.rr('rgba(6,8,12,.88)', 496, 170, 135, 34, 3);
+    K.text('MM presence', 502, 177, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
     KEYS.forEach((id, i) => {
       const st = presence[AGENT_MM[id]] || 'offline';
       const col = st === 'online' ? '#5fe08a' : st === 'away' ? '#ffd23f' : st === 'dnd' ? '#ff5a5a' : '#5a6272';
-      K.circle(col, CW - 137 + i * 13, 186, 3.4);
+      K.circle(col, 502 + i * 13, 186, 3.4);
     });
-    K.text(`${online} of ${KEYS.length} online`, CW - 137, 197, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
+    K.text(`${online} of ${KEYS.length} online`, 502, 197, { size: 8, color: '#aeb9cf', font: 'ui-monospace, Menlo, Consolas, monospace' });
   }
 
   window.CubicleThemes.register({

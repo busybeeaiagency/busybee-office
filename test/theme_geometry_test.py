@@ -178,5 +178,53 @@ class LabelsClearTheGeometry(unittest.TestCase):
                                             f"loiter spots {x},{y} and {ox},{oy} share a chip row too closely")
 
 
+class LoungeClearsTheHud(unittest.TestCase):
+    """The HUD (vitals + Mattermost presence) is painted in overlay(), which runs AFTER props(), so
+    anything drawn at y >= 170 under a panel gets painted over. The presence panel used to hang at
+    CW - 143 — straight onto the lounge floor, over the table and the coffee machine, so the lounge
+    read as an empty room with a HUD floating on it. It now belongs to the corridor strip (x 496)
+    and the two lounge pieces that sank under the panel band moved up; the lounge floor stays visible.
+    """
+
+    PANEL_W = 135          # width of the presence panel, x extent
+    CHAIR_R = 2.5 + 2.2    # a table chair's reach below the table edge, in office units
+
+    def panel_y(self):
+        """The presence panel's y, parsed from the source (496 is its corridor x)."""
+        m = re.search(r"K\.rr\('rgba\(6,8,12,\.88\)', 496, ([\d.]+),", THEME)
+        self.assertIsNotNone(m, "the Mattermost presence panel vanished from overlay()")
+        return float(m.group(1))
+
+    def test_the_presence_panel_sits_at_the_panel_band(self):
+        self.assertEqual(self.panel_y(), 170,
+                         "the presence panel left the y 170 HUD band the vitals panel lives in")
+
+    def test_the_panel_lands_in_the_corridor_not_the_lounge(self):
+        lounge_x = float(re.search(r"const LOUNGE_X = ([\d.]+) \* ROOM_W;", THEME).group(1)) * ROOM_W
+        self.assertLess(496 + self.PANEL_W, lounge_x * T,
+                        "the presence panel reaches the lounge floor it must not cover")
+
+    def test_the_panel_is_no_longer_anchored_to_the_canvas_edge(self):
+        """`CW - n` is how the panel crept back onto the lounge; only a fixed corridor x is allowed."""
+        self.assertIsNone(re.search(r"K\.rr\('rgba\(6,8,12,\.88\)', CW - ", THEME),
+                          "a CW-anchored panel slides over the lounge again as the canvas resizes")
+
+    def test_the_lounge_table_clears_the_hud(self):
+        panel_y = self.panel_y()
+        m = re.search(r"K\.table\(\(LOUNGE_X \+ [\d.]+\) \* T, ([\d.]+) \* T", THEME)
+        self.assertIsNotNone(m, "the lounge table vanished from props()")
+        table_y = float(m.group(1))
+        self.assertLessEqual(table_y * T + 1.2 * T + self.CHAIR_R, panel_y,
+                             "the lounge table and its chairs sit under the presence panel")
+
+    def test_the_coffee_machine_clears_the_hud(self):
+        panel_y = self.panel_y()
+        m = re.search(r"K\.coffeeMachine\(c, \(LOUNGE_X \+ [\d.]+\) \* T, ([\d.]+) \* T\)", THEME)
+        self.assertIsNotNone(m, "the coffee machine vanished from props()")
+        coffee_y = float(m.group(1))
+        self.assertLessEqual(coffee_y * T + 22, panel_y,
+                             "the coffee machine body (y+10..y+22) sits under the presence panel")
+
+
 if __name__ == "__main__":
     unittest.main()
