@@ -68,9 +68,12 @@
         desks.push(d); DESK_ROOMS.set(dkey(d), r.id);
       }
     });
-    for (let i = 0; i < 10; i++) {
-      lounge.push([LOUNGE_X + 1.2 + (i % 5) * 1.8, 6.9 + Math.floor(i / 5) * 1.1 + (i % 2) * 0.3]);
-    }
+    // Idle loiter spots: four along the corridor in front of the rooms (6.5 tiles apart, wider than
+    // two worst-case name chips) and two deep in the lounge, clear of the door cooler and the
+    // panel band at y 170. The lounge pair can touch a chip at the smallest fit scales, where
+    // placeLabels suppresses one — a 9-tile lounge physically holds one 92 px name box.
+    const loiter = [[40.0, 7.3], [46.5, 7.3], [53.0, 7.3], [59.5, 7.3], [63.4, 8.4], [66.9, 9.3]];
+    for (const [lx, ly] of loiter) lounge.push([lx, ly]);
     const out = {
       id: 'mansion-v1', desks, lounge, CW, CH, wings: 1, rows: 1, OX: 0, loungeX: LOUNGE_X,
     };
