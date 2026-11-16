@@ -8,7 +8,10 @@ Endpoints (the page discovers the feed through /config.json):
   GET  /api/office/chat      Mattermost presence + latest #off-topic posts (1 req/min)
   GET  /api/office/actions   whether writes are allowed and which actions exist (capability)
   GET  /api/office/confirm   mint a single-use confirm token for one (action, task)  [x-cubicle]
+  GET  /api/office/kanban    the board grouped by agent (?agent=<roster id> for one card list)
+  GET  /api/office/dispatch  dry-run preview of one dispatcher pass (spawns nothing)
   POST /api/office/action    perform restart/approve/dismiss on a card               [x-cubicle]
+  POST /api/office/dispatch  nudge the dispatcher: one pass, over the dashboard API  [x-cubicle]
   GET  /healthz              liveness for the container
   GET  /api/appearance       {} (looks live in the browser's localStorage)
   GET  /api/cubicle/settings {"createTasks": false, ...}
@@ -27,7 +30,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server import actions, feed, roster, sources  # noqa: E402
+from server import actions, dispatch, feed, kanban_view, roster, sources  # noqa: E402
 
 PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
 DB_PATH = os.environ.get("OFFICE_DB", f"{sources.HERMES_DIR}/kanban.db")
@@ -147,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "queue": actions.queue_status()})
         if path == "/api/office/actions":
             return self._send(200, dict(actions.capability(),
-                                        queue=actions.queue_status()))
+                                        queue=actions.queue_status(),
+                                        dispatch=dispatch.capability()))
         if path == "/api/office/confirm":
             if (self.headers.get("x-cubicle") or "").strip() != "1":
                 return self._send(403, {"error": "x-cubicle required"})
@@ -162,6 +166,20 @@ class Handler(BaseHTTPRequestHandler):
                                     "expires_in": actions.TOKEN_TTL_S, "action": action,
                                     "task": task, "label": meta["label"], "why": meta["why"],
                                     "preview": actions.preview(action, task)})
+        if path == "/api/office/kanban":
+            agent = (parse_qs(urlparse(self.path).query).get("agent") or [""])[0].strip()
+            data = kanban_view.board(agent or None)
+            if data is None:                                   # not a fleet id: never echo the query
+                return self._send(404, {"ok": False, "error": "unknown_agent",
+                                        "message": f"no such agent in the roster: {agent}"})
+            if not data.get("ok"):
+                return self._send(503, data)
+            return self._send(200, data)
+        if path == "/api/office/dispatch":
+            # the preview: same handler, dry_run on, nothing spawned, no rate limit
+            code, body, retry = dispatch.nudge({"ts": int(time.time()), "actor": "office-dashboard"},
+                                               dry_run=True)
+            return self._send(code, body, retry_after=retry)
         if path == "/api/appearance":
             return self._send(200, {})
         if path == "/api/cubicle/settings":
@@ -183,8 +201,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, '{"error":"not found"}')
 
     def do_POST(self):
-        """The only write route. Every exit (including denials) logs one line to the actions log."""
+        """The write routes. Every exit (including denials) logs one line to the actions log."""
         path = urlparse(self.path).path
+        if path == "/api/office/dispatch":
+            return self._dispatch_pass()
         if path != "/api/office/action":
             return self._send(404, '{"error":"not found"}')
         rec = {"ts": int(time.time()), "actor": "dashboard"}
@@ -247,6 +267,24 @@ class Handler(BaseHTTPRequestHandler):
         rec.update({"ok": True, "before": result["before"], "after": result["after"],
                     "run_id": result["run_id"]})
         return answer(200, result)
+
+    def _dispatch_pass(self):
+        """POST /api/office/dispatch: one dispatcher pass over the dashboard API, never a db write.
+
+        Same guard and same "every exit logs one line" answer as the card actions; the log line
+        carries the pass counters, so "the nudge caused a dispatcher pass" is provable afterwards.
+        """
+        if (self.headers.get("x-cubicle") or "").strip() != "1":
+            return self._send(403, {"ok": False, "error": "x_cubicle_required",
+                                    "message": "x-cubicle required"})
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 4096:
+            return self._send(413, {"ok": False, "error": "too_large",
+                                    "message": "body exceeds 4096 bytes"})
+        if length:                                       # nobody sends a body today; keep-alive safe
+            self.rfile.read(length)
+        code, body, retry = dispatch.nudge({"ts": int(time.time()), "actor": "office-dashboard"})
+        return self._send(code, body, retry_after=retry)
 
 
 def main():
