@@ -61,9 +61,13 @@
     const lounge = [];
     DESK_ROOMS.clear();
     TAKEN.clear();
-    for (const r of ROOMS) {
-      for (const d of r.desks) { desks.push(d); DESK_ROOMS.set(dkey(d), r.id); }
-    }
+    ROOMS.forEach((r, i) => {
+      // the pair is written room-local; the canvas needs the room's absolute tile x
+      for (const [dx, dy] of r.desks) {
+        const d = [i * ROOM_W + dx, dy];
+        desks.push(d); DESK_ROOMS.set(dkey(d), r.id);
+      }
+    });
     for (let i = 0; i < 10; i++) {
       lounge.push([LOUNGE_X + 1.2 + (i % 5) * 1.8, 6.9 + Math.floor(i / 5) * 1.1 + (i % 2) * 0.3]);
     }
@@ -120,8 +124,8 @@
       K.window(c, rx(i) + 2.75 * T, 2, 7 * T, 16, (cc, x, y, w, h) => K.skyline(cc, x, y, w, h, 3 + i));
     });
 
-    // company name on the research wall, centred on it (the room spans x 2..3 tiles of its own
-    // 12.5; y 12 with size-7 glyphs stays above the plaque line at 18)
+    // company name on the wall, centred on the research room (its middle is 2.5 rooms along, and
+    // that wall has no window); y 12 with size-7 glyphs stays above the plaque line at 18
     K.sign(c, 2.5 * ROOM_W * T, 12, { color: '#d8b25a', size: 7 });
 
     // room plaques on the back wall of each room: the wall strip ends at WALL_TOP (32) and the
@@ -273,6 +277,7 @@
     scale: 4, smooth: true, allDesks: true, loungeX: LOUNGE_X,
     setup() {}, drawRoom, props, drawDesk, drawChar, overlay, plan, pickDesk,
     obstacles: () => boundaries.map((b) => [b - 4, WALL_TOP, b + 4, WALL_BOTTOM]),
-    logoSpot: [CW - 2.8 * T, 2, 2.2 * T, 15],
+    // the user's logo hangs right of the status board (whose frame ends at CW - 2.34 * T)
+    logoSpot: [CW - 2.2 * T, 2, 1.8 * T, 15],
   });
 })();
