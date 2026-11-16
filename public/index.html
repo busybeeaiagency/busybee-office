@@ -5076,10 +5076,16 @@
   const G = { ...GH_TEXT.en, ...(GH_TEXT[lang] || {}) };
   const ghBtn = document.getElementById('ghq'), ghDlg = document.getElementById('ghdlg');
   let ghState = null;
+  let ghTimer = null;
   async function pollGithub() {
     if (DEMO || EMBED) return;
     try {
       const r = await fetch('/api/cubicle/github', { cache: 'no-store' });
+      // A 404 here means the server has no GitHub feed at all (the office dashboard answers 404 for
+      // this route), and an unconditional 60 s timer re-asked a route that will never exist: 488
+      // "GET /api/cubicle/github 404" lines in one container lifetime on 2026-11-16. A missing
+      // route is permanent, so stop asking — same self-cancel shape as the attention poll below.
+      if (r.status === 404 || r.status === 405) { clearInterval(ghTimer); ghTimer = null; }
       ghState = r.ok ? await r.json() : null;
     } catch (_) { ghState = null; }
     renderGhBtn(); if (ghDlg.open) renderGh();
@@ -5118,7 +5124,7 @@
     const b = e.target.closest('[data-ghprep]');
     if (b) { b.disabled = true; await fetch('/api/cubicle/github', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cubicle': '1' }, body: JSON.stringify({ prepare: b.dataset.ghprep }) }).catch(() => null); pollGithub(); }
   });
-  setInterval(pollGithub, 60000); setTimeout(pollGithub, 1500); setInterval(renderGhBtn, 5000);
+  ghTimer = setInterval(pollGithub, 60000); setTimeout(pollGithub, 1500); setInterval(renderGhBtn, 5000);
 
   const gear = document.getElementById('gear');
   const panel = document.getElementById('settings');
