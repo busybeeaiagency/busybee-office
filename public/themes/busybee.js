@@ -1,4 +1,4 @@
-// Cubicle theme: BUSY BEE mansion. Five rooms (Coding, Game Dev, Research, Communications, Art)
+// Cubicle theme: BUSY BEE mansion. Six rooms (Coding, Game Dev, Research, Communications, Art, Security)
 // plus a lounge, in one wide panorama. Agents are seated at a desk in the room their work belongs
 // to (the page's theme.pickDesk hook); idle agents wander the lounge; the overlay draws the
 // homelab vitals and Mattermost presence. Everything is drawn in code, as upstream requires.
@@ -25,9 +25,10 @@
     { id: 'research', en: 'Research', tr: 'Araştırma', accent: '#22c55e', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
     { id: 'comms', en: 'Comms', tr: 'İletişim', accent: '#22d3ee', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
     { id: 'art', en: 'Art', tr: 'Sanat', accent: '#eab308', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
+    { id: 'security', en: 'Security', tr: 'Güvenlik', accent: '#16a34a', desks: [[2.6, DESK_Y], [8.1, DESK_Y]] },
   ];
-  const LOUNGE_X = 5 * ROOM_W;            // tiles; x where the lounge starts (62.5)
-  const CW_TILES = 5 * ROOM_W + 9;        // 5 rooms + lounge (71.5)
+  const LOUNGE_X = 6 * ROOM_W;            // tiles; x where the lounge starts (75)
+  const CW_TILES = 6 * ROOM_W + 9;        // 6 rooms + lounge (84)
   const CW = CW_TILES * T, CH = 13 * T;
 
   // desk tile -> room id, so the seat picker and the desk painter agree
@@ -38,8 +39,9 @@
   const AGENT_COLORS = {
     coder: '#2f6fed', coder2: '#8b5cf6', auditor: '#f59e0b',
     maya: '#22d3ee', researcher: '#22c55e', orchestrator: '#eab308',
+    cyber: '#00e676',
   };
-  const AGENT_MM = { coder: 'coder', coder2: 'coder2', auditor: 'auditor', maya: 'maya', researcher: 'researcher', orchestrator: 'hermes' };
+  const AGENT_MM = { coder: 'coder', coder2: 'coder2', auditor: 'auditor', maya: 'maya', researcher: 'researcher', orchestrator: 'hermes', cyber: 'cyber' };
   const KEYS = Object.keys(AGENT_COLORS).sort((a, b) => b.length - a.length);   // coder2 before coder
 
   // The page prefixes sprite ids with the feed ("/api/feed/0#coder") and the display name
@@ -74,7 +76,7 @@
     // idle agent's own chips (name + one zZ/☕ line ~36 px tall at k >= 0.6) never share a box
     // with a seated chip or with another loiterer: nearest neighbours are >= 88 px apart and
     // the lower row still clears the overlay panels at y 170.
-    const loiter = [[11.1, 9.2], [36.1, 9.2], [60.5, 9.2], [23.6, 10.35], [48.6, 10.35], [66.3, 10.35]];
+    const loiter = [[11.1, 9.2], [36.1, 9.2], [60.5, 9.2], [23.6, 10.35], [48.6, 10.35], [68.75, 10.35], [78.8, 10.35]];
     for (const [lx, ly] of loiter) lounge.push([lx, ly]);
     const out = {
       id: 'mansion-v1', desks, lounge, CW, CH, wings: 1, rows: 1, OX: 0, loungeX: LOUNGE_X,
@@ -187,6 +189,19 @@
       K.circle(i ? '#eab308' : '#22c55e', ex + 0.6 * T, ey + 0.9 * T, 0.35 * T);
     }
 
+    // Security: a wall terminal glowing green-on-black + a dark patch rack + a plant
+    K.rr('#04070a', rx(5) + 0.9 * T, 2.6 * T, 4.2 * T, 2.0 * T, 1);
+    K.rect('#0a1f14', rx(5) + 1.15 * T, 2.85 * T, 3.7 * T, 1.5 * T);
+    for (let i = 0; i < 4; i++)
+      K.rect('#1f7a44', rx(5) + (1.4 + (i % 2) * 0.5) * T, (3.05 + i * 0.35) * T, (2.4 - (i % 2) * 0.9) * T, 0.16 * T);
+    K.rect('#5fe08a', rx(5) + 1.4 * T, 4.05 * T, 0.7 * T, 0.16 * T);
+    K.rr('#101418', rx(5) + 6.2 * T, 2.6 * T, 2.2 * T, 2.8 * T, 1);
+    for (let i = 0; i < 5; i++) {
+      K.rect('#05070a', rx(5) + 6.45 * T, (2.75 + i * 0.52) * T, 1.9 * T, 0.4 * T);
+      K.circle(Math.floor(c.t * 3 + i) % 4 ? '#00e676' : '#0c3b22', rx(5) + 6.7 * T, (2.95 + i * 0.52) * T, 0.45);
+    }
+    K.plant(rx(5) + 11.0 * T, 5.4 * T, { size: 1 });
+
     // lounge: rug and plants on the floor; the clock and the status board hang on the lounge
     // stretch of wall (x >= LOUNGE_X * T) in the 0..17 band above the plaque line.
     K.rr('rgba(245,158,11,.16)', (LOUNGE_X + 0.6) * T, 6.6 * T, (CW_TILES - LOUNGE_X - 1.2) * T, 3.8 * T, 5);
@@ -211,7 +226,7 @@
     K.begin(c);
     const room = DESK_ROOMS.get(dkey(d));
     const accent = (ROOMS.find((r) => r.id === room) || {}).accent || '#8b93a8';
-    K.desk(c, d, s, { top: [accent, '#2b303b'], screens: 2, on: '#8fe3ff', mug: room ? '#e8e3d6' : '#e8e3d6' });
+    K.desk(c, d, s, { top: [accent, '#2b303b'], screens: 2, on: room === 'security' ? '#5fe08a' : '#8fe3ff', mug: room ? '#e8e3d6' : '#e8e3d6' });
   }
 
   function drawChar(c, s) {
@@ -222,7 +237,7 @@
       hair: K.pick(s, 'hair', ['short', 'long', 'bun', 'pony', 'curly']),
       badge: color,
       tag: true,
-      coat: agentKey(s) === 'orchestrator' ? '#2f3542' : null,
+      coat: agentKey(s) === 'orchestrator' ? '#2f3542' : (agentKey(s) === 'cyber' ? '#10151b' : null),
     });
     if (s.status === 'error' || s.status === 'waiting') {
       // blocked reads red: a ring under the character, whatever the kit's monitor does

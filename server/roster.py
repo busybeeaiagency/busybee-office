@@ -12,6 +12,7 @@ ROOMS = [
     {"id": "research", "name": "Research", "accent": "#22c55e"},
     {"id": "comms", "name": "Communications", "accent": "#22d3ee"},
     {"id": "art", "name": "Art", "accent": "#eab308"},
+    {"id": "security", "name": "Security", "accent": "#16a34a"},
 ]
 LOUNGE = {"id": "lounge", "name": "Lounge", "accent": "#f59e0b"}
 
@@ -36,6 +37,8 @@ AGENTS = [
      "home_room": "research", "color": "#22c55e", "mm": "researcher"},
     {"id": "orchestrator", "name": "\U0001f7e1 orchestrator", "role": "Hermes orchestrator (CEO)",
      "home_room": "art", "color": "#eab308", "mm": "hermes", "ceo": True},
+    {"id": "cyber", "name": "⚫ cyber", "role": "Penetration-testing operator (cyber range)",
+     "home_room": "security", "color": "#00e676", "mm": "cyber"},
 ]
 
 # Task-title keywords that send a working agent to a different room than its home room.
@@ -45,6 +48,7 @@ ROOM_KEYWORDS = {
     "research": r"\b(research|researcher|benchmark|survey|literature|paper|study)\b",
     "comms": r"\b(mail|e-mail|email|calendar|meeting|mattermost|newsletter|announce|slack|blog|tweet|social)\b",
     "art": r"\b(logo|brand|poster|illustrat|icon|banner|thumbnail|slide|deck|art direction)\b",
+    "security": r"\b(security|secure|firewall|vulnerab\w*|pentest|penetration test\w*|cve-\d+|malware|intrusion|nmap|metasploit|nuclei|cyber[- ]?range|red team|blue team)\b",
     "coding": r"\b(api|backend|frontend|deploy(?:ment)?|docker|portainer|systemd|migration|refactor|database|postgres|redis|config|infrastructure|security|audit)\b",
 }
 
