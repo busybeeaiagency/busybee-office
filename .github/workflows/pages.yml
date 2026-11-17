@@ -18,15 +18,21 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# Dual-host workflow. Gitea (10.10.10.202:3001) is the primary repo and runs
+# this workflow too, but neither Gitea Pages (disabled on the instance) nor
+# the private GitHub mirror's Pages API is served by actions/configure-pages,
+# upload-pages-artifact and deploy-pages there (they hit the GitHub Pages
+# REST API and 404). So the Pages-specific steps are gated to GitHub Actions
+# via github.server_url; on Gitea the job still does the useful work — it
+# assembles the _site tree and validates it — and exits green without
+# ever touching the Pages API.
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - id: configure_pages
+        if: github.server_url == 'https://github.com'
         uses: actions/configure-pages@v5
       # the page itself, plus what search engines and link previews look for
       - name: Assemble the site
@@ -36,8 +42,24 @@ jobs:
           SITE_URL="${SITE_URL:-https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/}"
           printf 'User-agent: *\nAllow: /\nSitemap: %ssitemap.xml\n' "$SITE_URL" > _site/robots.txt
           printf '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n<url><loc>%s</loc><lastmod>%s</lastmod></url>\n</urlset>\n' "$SITE_URL" "$(date -u +%F)" > _site/sitemap.xml
-      - uses: actions/upload-pages-artifact@v3
+          echo "Assembled _site for SITE_URL=$SITE_URL (server: ${GITHUB_SERVER_URL:-unknown})"
+      # Host-independent smoke checks on the assembled tree: a broken site or
+      # a regressed legacy URL must fail here, on the primary host, before
+      # anything is ever published.
+      - name: Validate the assembled site
+        run: |
+          test -s _site/index.html
+          test -s _site/social.png
+          test -s _site/robots.txt
+          test -s _site/sitemap.xml
+          if grep -qi 'caglarutkuguler' _site/robots.txt _site/sitemap.xml; then
+            echo "::error::legacy caglarutkuguler.github.io URL regressed into robots.txt/sitemap.xml"
+            exit 1
+          fi
+      - if: github.server_url == 'https://github.com'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: _site
       - id: deployment
+        if: github.server_url == 'https://github.com'
         uses: actions/deploy-pages@v4
