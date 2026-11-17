@@ -84,10 +84,13 @@ class FeedTest(unittest.TestCase):
         self.assertEqual(coder["room"], "gamedev")
         self.assertEqual(coder["task"]["title"], "Build the Godot level editor")
 
-    def test_stale_claim_is_not_running(self):
+    def test_stale_claim_still_works_with_a_dead_run_line(self):
+        # t_e9d78791: the board says claimed => the badge says working. Staleness lives in the
+        # run line (alive=false), never as an idle badge contradicting the card's kanban counts.
         self.add("t3", "coder", "running", started=self.now - 900, expires=self.now - 10, hb=None)
-        data = feed.build_feed(feed.read_tasks(self.path), now=self.now)
-        self.assertNotEqual(self.by_id(data, "coder")["status"], "running")
+        coder = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now), "coder")
+        self.assertEqual(coder["status"], "running")
+        self.assertFalse(coder["run"]["alive"])
 
     def test_blocked_is_red(self):
         # A needs_input block is now AMBER (waiting), not red — rule 2 splits by *why*.
@@ -257,13 +260,14 @@ class FeedTest(unittest.TestCase):
         self.assertEqual(aud["previous"][0]["outcome"], "crashed")
         self.assertTrue(aud["previous"][0]["steps"][0][1].startswith("crashed"))
 
-    def test_dead_run_is_not_running(self):
+    def test_dead_run_keeps_working_with_dead_run_line(self):
         self.add("t_r2", "auditor", "running", title="Stalled audit", started=self.now - 3600,
                  expires=self.now - 100, hb=self.now - 3600)
-        self.add_run(282, "t_r2", started=self.now - 3600, ended=None, hb=self.now - 10800, expires=self.now - 100)
+        self.add_run(282, "t_r2", started=self.now - 3600, ended=None, hb=self.now - 2000, expires=self.now - 100)
         aud = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now), "auditor")
-        self.assertNotEqual(aud["status"], "running")
-        self.assertNotIn("run", aud)                            # no live run -> no run field
+        self.assertEqual(aud["status"], "running")                  # claimed on the board => working
+        self.assertFalse(aud["run"]["alive"])                       # the run line carries the truth
+        self.assertEqual(aud["run"]["heartbeatAgeS"], 2000)         # docs/spec-feed-liveness.md formula
 
     def test_steps_fall_back_to_comments_when_events_missing(self):
         self.add("t_r3", "coder", "running", title="Build it", started=self.now - 200,
@@ -347,6 +351,28 @@ class FeedTest(unittest.TestCase):
                 os.unlink(state_file)
             except OSError:
                 pass
+
+    def test_acceptance_one_running_card_badges_working_and_header_counts_it(self):
+        # Card t_e9d78791 acceptance 1: one running card for assignee X => badge working AND the
+        # header working-count (sum of feed agent statuses, exactly what index.html computes) >= 1.
+        self.add("t_a1", "maya", "running", title="Ship the badge", started=self.now - 60,
+                 expires=self.now + 600)
+        data = feed.build_feed(feed.read_tasks(self.path), now=self.now)
+        maya = self.by_id(data, "maya")
+        self.assertEqual(maya["status"], "running")
+        self.assertTrue(maya["run"]["alive"])
+        header_working = sum(1 for a in data["agents"] if a["status"] == "running")
+        self.assertGreaterEqual(header_working, 1)
+
+    def test_live_card_wins_the_task_line_over_a_stalled_one(self):
+        self.add("t_s1", "coder", "running", title="Stalled one", started=self.now - 7200,
+                 expires=self.now - 60, hb=self.now - 3600)
+        self.add("t_l1", "coder", "running", title="Live one", started=self.now - 60,
+                 expires=self.now + 600)
+        coder = self.by_id(feed.build_feed(feed.read_tasks(self.path), now=self.now), "coder")
+        self.assertEqual(coder["status"], "running")
+        self.assertEqual(coder["task"]["id"], "t_l1")
+        self.assertTrue(coder["run"]["alive"])
 
 
 class RosterTest(unittest.TestCase):

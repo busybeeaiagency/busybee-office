@@ -2,7 +2,9 @@
 
 One agent entry per roster id (server/roster.py). The status rule, per assignee:
 
-  running task with a live claim      -> running  (walks to its room, types)
+  running task                        -> running  (walks to its room, types; a dead claim or
+                                     heartbeat does NOT demote the badge - the run line says
+                                     "dead" via run.alive=false, and that line is the proof)
   blocked, waiting on a human         -> waiting  (amber: "BLOCKED: needs input")
   blocked because it crashed          -> error    (red: "CRASHED: <first line>")
   queued work (ready/todo)            -> paused   (lounge, "zZ")
@@ -13,7 +15,9 @@ A blocked card is split by *why* it is blocked (see _block_kind): needing input 
 are different states and must not share a badge — that is what removes the "0 waiting for a decision"
 vs "BLOCKED: needs input" contradiction. A card only raises a badge while it is the agent's *current*
 state (rule 3): once the agent started/finished something newer, the badge is history and the card
-drops into `stale`, never hidden. `working` always means the CURRENT run and proves it is alive.
+drops into `stale`, never hidden. `working` always means the CURRENT claimed card on the board;
+liveness is proved separately by the run line (`run.alive`), never by demoting a claimed card's
+badge to idle - that demotion is what made the badge contradict the card's own kanban counts.
 
 The status vocabulary stays inside the cubicle feed contract (docs/FEED.md):
 running | waiting | error | paused | idle. Timestamps in kanban.db are epoch seconds; the feed
@@ -352,12 +356,17 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
     agents_out = []
     for agent in roster.AGENTS:
         mine = by_assignee.get(agent["id"], [])
-        running, blocked, review, queued, done = [], [], [], [], []
+        running, stalled, blocked, review, queued, done = [], [], [], [], [], []
         for t in mine:
             st = t["status"]
             if st == "running":
+                # The board says this card is claimed: it keeps the agent WORKING, so the badge and
+                # the card's own kanban counts can never disagree (t_e9d78791). A dead claim or
+                # heartbeat does not demote to idle - it shows honestly as run.alive=false.
                 if _live(t, _open_run(runs_map.get(t["id"], [])), now):
                     running.append(t)
+                else:
+                    stalled.append(t)
             elif st == "blocked":
                 blocked.append(t)
             elif st == "review":
@@ -367,6 +376,7 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
             elif st == "done":
                 done.append(t)
         running.sort(key=lambda t: t["started_at"] or 0, reverse=True)
+        stalled.sort(key=lambda t: t["started_at"] or 0, reverse=True)
         review.sort(key=lambda t: review_at.get(t["id"], 0), reverse=True)
 
         # Attention vs stale: the cards that need the OPERATOR. Blocked cards split by reason (rule
@@ -396,13 +406,15 @@ def build_feed(tasks, now=None, chat_by_agent=None, dashboard_url=None, previous
         if done:
             completed_at = _iso(done[0]["completed_at"])
 
-        if running:
+        if running or stalled:
             status = "running"
-            t = running[0]
+            t = (running or stalled)[0]                              # a live card wins the line
             runs_list = runs_map.get(t["id"], [])
-            task = _task_obj(t["id"], t["title"], dashboard_url)     # entry["task"]: live run ONLY (rule 6)
-            run_field, recent, previous = _run_view(t, _open_run(runs_list), runs_list,
+            open_run = _open_run(runs_list)
+            task = _task_obj(t["id"], t["title"], dashboard_url)     # entry["task"]: CURRENT card (rule 6)
+            run_field, recent, previous = _run_view(t, open_run, runs_list,
                                                     events_by_run, comments_by_task, now)
+            run_field["alive"] = _live(t, open_run, now)             # liveness proof, not the badge
             # Live on one card, but another card may still be waiting on the operator: the badge says
             # "working" (truth: a claimed, heartbeating run), the banner still names the blocked card
             # so its action buttons stay reachable. Only the extras fall through to history.
