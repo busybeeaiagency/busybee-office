@@ -1422,6 +1422,67 @@
   const BASE_DESKS = [[1,3],[4.5,3],[8,3],[11.5,3],[1,7.5],[4.5,7.5],[8,7.5],[11.5,7.5],[1,10.5],[4.5,10.5],[8,10.5],[11.5,10.5]];
   const BASE_LOUNGE = [[16,4.4],[18,4.4],[20,4.4],[16.2,10],[18.3,10.6],[20.3,10],[15.8,7.4],[21,7.4],[17,12],[19.5,12],[16.4,5.6],[19.6,5.6]];
   let DESKS = BASE_DESKS, LOUNGE = BASE_LOUNGE, ROWS = 3, WINGS = 1, AGENTS = 0;
+  // ---------- stable viewport (mobile toolbar settle) ----------
+  // Mobile Chrome/Safari (Comet on iPhone) fires a resize when its URL bar / toolbar settle after
+  // the page has painted. That shrink is browser chrome, not the office asking for a smaller fit:
+  // recomputing the stage from it makes the whole mansion visibly shrink a moment after load.
+  // On a touch device a shrink-resize under 15% of the stable height is therefore ignored — the
+  // fit keeps using the initial viewport; growth always wins (the bar collapsing frees real
+  // space); a >=15% shrink that a LATER resize repeats (a real window change, not the one settle
+  // burst) or a width change (rotation, window snap) re-baselines and the office refits.
+  // Desktop (fine pointer) keeps STABLE tracking the live viewport: its fit is unchanged.
+  // This block sits before the layout functions so its resize handler is registered FIRST and
+  // decides the stable viewport before the fit handlers below read it.
+  let STABLE_W = 0, STABLE_H = 0, SHRINK_H = 0, SHRINK_AGO = 0, SHRINK_TIMER = 0, VIEW_CHANGED = false;
+  const TOUCH_VIEW = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  function refitNow() { if (AGENTS) layoutFor(AGENTS, true); else fitLayout(); }   // a real viewport change: fit again
+  function stableViewport() {
+    // The layout viewport (innerWidth/innerHeight) already tracks the toolbar settle; the
+    // visualViewport is deliberately NOT used as the source — on iOS it also moves with pinch
+    // zoom and the soft keyboard, which are exactly the changes this fit must ignore.
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (STABLE_W === 0) { STABLE_W = vw; STABLE_H = vh; }
+    else if (vw !== STABLE_W) { STABLE_W = vw; STABLE_H = vh; SHRINK_H = 0; VIEW_CHANGED = true; }   // rotation, window snap
+    else if (vh > STABLE_H) { STABLE_H = vh; SHRINK_H = 0; VIEW_CHANGED = true; }                    // chrome collapsed: more room
+    else if (STABLE_H - vh >= 0.15 * STABLE_H) {
+      // A toolbar settle is one burst the browser does not repeat; a real shrink (minimise,
+      // another window taking the row) sits there. Do NOT refit on the burst: note it and let a
+      // 2 s timer decide — if the viewport is STILL the shrunken one then, it was a real change.
+      if (SHRINK_H !== vh) {
+        SHRINK_H = vh; SHRINK_AGO = Date.now();
+        clearTimeout(SHRINK_TIMER);
+        SHRINK_TIMER = setTimeout(() => {
+          SHRINK_TIMER = 0;
+          const still = window.innerHeight <= vh + 2 && window.innerWidth === vw;
+          SHRINK_H = 0;
+          if (still) { STABLE_H = Math.min(STABLE_H, window.innerHeight); refitNow(); }
+        }, 2000);
+      }
+    }
+    return { w: STABLE_W, h: STABLE_H };
+  }
+  window.addEventListener('resize', () => {
+    stableViewport();
+    if (TOUCH_VIEW && VIEW_CHANGED) { VIEW_CHANGED = false; refitNow(); }   // rotation / growth: refit NOW; a pending shrink refits from its timer
+  });
+
+  // ?debug=scale: a fixed readout of the rendered scale (canvas CSS width / office width) plus the
+  // viewport the fit is using, so a shrink on a real phone can be confirmed on the phone.
+  const DEBUG_SCALE = params.get('debug') === 'scale';
+  let debugScaleEl = null;
+  function updateDebugScale() {
+    if (!DEBUG_SCALE) return;
+    if (!debugScaleEl) {
+      debugScaleEl = document.createElement('div');
+      debugScaleEl.className = 'debug-scale';
+      document.body.appendChild(debugScaleEl);
+    }
+    const k = stageEl.clientWidth / CW;
+    debugScaleEl.textContent = 'scale ' + k.toFixed(3) + '  stage ' + Math.round(stageEl.clientWidth)
+      + 'x' + Math.round(stageEl.clientHeight) + '  fit-viewport ' + STABLE_W + 'x' + STABLE_H
+      + '  live ' + window.innerWidth + 'x' + window.innerHeight + '  shr ' + SHRINK_H;
+  }
+
   // The shape the office should have: the room it gets on the page (or the screen on a kiosk).
   function targetAspect() {
     let mode = 'auto'; try { mode = settings.layout || 'auto'; } catch (_) {}
@@ -2354,55 +2415,6 @@
   // A big office grows taller (more desk rows). Instead of running off the bottom of the window,
   // it keeps its shape and fits the height that is left; on a wide window the cards move beside
   // it. ⚙ Layout: auto, side by side, or the old cards-below at full width.
-  // ---------- stable viewport (mobile toolbar settle) ----------
-  // Mobile Chrome/Safari (Comet on iPhone) fires a resize when its URL bar / toolbar settle after
-  // the page has painted. That shrink is browser chrome, not the office asking for a smaller fit:
-  // recomputing the stage from it makes the whole mansion visibly shrink a moment after load.
-  // On a touch device a shrink-resize under 15% of the stable height is therefore ignored — the
-  // fit keeps using the initial viewport; growth always wins (the bar collapsing frees real
-  // space); a >=15% shrink or a width change (rotation, desktop window snap) re-baselines and the
-  // office refits. Desktop (fine pointer) never takes this branch: its behaviour is unchanged.
-  let STABLE_W = 0, STABLE_H = 0;
-  const TOUCH_VIEW = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  function stableViewport() {
-    let vw = window.innerWidth, vh = window.innerHeight;
-    try {
-      const vv = window.visualViewport;
-      if (vv && Number.isFinite(vv.width) && Number.isFinite(vv.height)) { vw = vv.width; vh = vv.height; }
-    } catch (_) {}
-    if (STABLE_W === 0) { STABLE_W = vw; STABLE_H = vh; }
-    else if (vw !== STABLE_W) { STABLE_W = vw; STABLE_H = vh; }              // rotation, window snap
-    else if (vh > STABLE_H) { STABLE_H = vh; }                               // chrome collapsed: more room
-    else if (STABLE_H - vh >= 0.15 * STABLE_H) { STABLE_H = vh; }            // a real shrink, not a toolbar
-    return { w: STABLE_W, h: STABLE_H };
-  }
-  window.addEventListener('resize', () => {
-    const v = stableViewport();
-    if (!TOUCH_VIEW) return;                                   // desktop refits through the normal handlers
-    const vv = window.visualViewport;
-    const dw = vv ? Math.abs(vv.width - v.w) : Math.abs(window.innerWidth - v.w);
-    const dh = vv ? Math.abs(vv.height - v.h) : Math.abs(window.innerHeight - v.h);
-    if (dw <= 2 && dh <= 2) { return; }                        // a toolbar settle: keep the load-time fit
-    if (typeof AGENTS !== 'undefined' && AGENTS) layoutFor(AGENTS, true);
-    else fitLayout();
-  });
-
-  // ?debug=scale: a fixed readout of the rendered scale (canvas CSS width / office width) plus the
-  // viewport the fit is using, so a shrink on a real phone can be confirmed on the phone.
-  const DEBUG_SCALE = params.get('debug') === 'scale';
-  let debugScaleEl = null;
-  function updateDebugScale() {
-    if (!DEBUG_SCALE) return;
-    if (!debugScaleEl) {
-      debugScaleEl = document.createElement('div');
-      debugScaleEl.className = 'debug-scale';
-      document.body.appendChild(debugScaleEl);
-    }
-    const k = stageEl.clientWidth / CW;
-    debugScaleEl.textContent = 'scale ' + k.toFixed(3) + '  stage ' + Math.round(stageEl.clientWidth)
-      + 'x' + Math.round(stageEl.clientHeight) + '  fit-viewport ' + STABLE_W + 'x' + STABLE_H;
-  }
-
   const mainEl = document.getElementById('main');
   function fitLayout() {
     if (!mainEl) return;
