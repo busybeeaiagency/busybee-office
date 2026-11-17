@@ -1,6 +1,6 @@
 # Cubicle
 
-> **BUSY BEE fork:** this repo is the BUSY BEE animated office dashboard (five rooms fed by
+> **BUSY BEE fork:** this repo is the BUSY BEE animated office dashboard (six rooms fed by
 > `kanban.db`, Mattermost, Beszel and Uptime Kuma), served at http://10.10.10.202:9120.
 > Everything below is the upstream cubicle documentation; the fork's own docs, data-endpoint
 > map and deploy instructions are in **[README-DASHBOARD.md](README-DASHBOARD.md)**.

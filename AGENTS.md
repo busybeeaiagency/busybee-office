@@ -8,7 +8,7 @@ Python server; both halves are live at http://10.10.10.202:9120.
 - `public/` — the vendored cubicle client (index.html, index.js, themes/kit.js, themes/*.js).
   Treat `kit.js`, `plaza.js`, `military.js`, etc. as **upstream**: change them only if you must,
   and say so in the commit message.
-- `public/themes/busybee.js` — **our** theme (the five rooms). This is where the visuals live.
+- `public/themes/busybee.js` — **our** theme (the six rooms). This is where the visuals live.
 - `public/index.html` — upstream + a handful of *guarded* hooks our theme uses. Never remove the
   `theme.plan` / `theme.pickDesk` / `ROOM_*` blocks; stock themes depend on the fallbacks staying.
 - `server/` — our stdlib HTTP server: `office.py` (routes), `feed.py` (kanban → cubicle),

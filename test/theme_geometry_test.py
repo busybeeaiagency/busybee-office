@@ -81,7 +81,7 @@ class ThemeOwnsTheLayout(unittest.TestCase):
 class PlaquesClearTheChips(unittest.TestCase):
     def test_plaques_are_above_the_chip_band(self):
         windows, sign, plaques = wall_numbers()
-        self.assertEqual(len(plaques), 2, "one call in the room loop (five rooms) plus the lounge")
+        self.assertEqual(len(plaques), 2, "one call in the room loop (every room) plus the lounge")
         for y, h in plaques:
             self.assertEqual(h, PLAQUE_H)
             self.assertLess(y + h - 1, CHIP_TOP_Y,
@@ -113,6 +113,7 @@ class PlaquesClearTheChips(unittest.TestCase):
 
 
 ROOM_W = float(re.search(r"const ROOM_W = ([\d.]+);", THEME).group(1))
+N_ROOMS = len(re.findall(r"\{ id: '", THEME))
 
 
 class LabelsClearTheGeometry(unittest.TestCase):
@@ -155,11 +156,11 @@ class LabelsClearTheGeometry(unittest.TestCase):
         m = re.search(r"const loiter = \[(.*?)\];", THEME, re.S)
         self.assertIsNotNone(m, "the loiter spot table vanished from plan()")
         spots = [(float(a), float(b)) for a, b in re.findall(r"\[([\d.]+), ([\d.]+)\]", m.group(1))]
-        self.assertGreaterEqual(len(spots), 6, "one loiter spot per agent slot")
+        self.assertGreaterEqual(len(spots), N_ROOMS + 1, "one loiter spot per room plus the lounge")
         desk_y = float(re.search(r"const DESK_Y = ([\d.]+);", THEME).group(1))
         offs = [float(v) for v in re.search(r"desks: \[\[(\d+(?:\.\d+)?), DESK_Y\], \[(\d+(?:\.\d+)?), DESK_Y\]\]", THEME).groups()]
-        desk_sits = [(i * ROOM_W + off) * T + 22 for i in range(5) for off in offs]
-        cw = math.ceil((5 * ROOM_W + 9) * T)
+        desk_sits = [(i * ROOM_W + off) * T + 22 for i in range(N_ROOMS) for off in offs]
+        cw = math.ceil((N_ROOMS * ROOM_W + 9) * T)
         for x, y in spots:
             feet, top, half = y * T, y * T - 40.0, 52.0
             self.assertLessEqual(feet, 169.5, f"loiter spot {x},{y} sinks its name into the panel band")
